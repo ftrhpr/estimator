@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, FlatList, Alert } from 'react-native';
 import { Appbar, FAB, Searchbar, Text, Modal, Portal, Switch, List, Divider } from 'react-native-paper';
-import { Service, ServiceFormData } from '../../types';
-import { ServiceService } from '../../services/serviceService';
-import { ServiceCard } from '../../components/common/ServiceCard';
-import { ServiceForm } from '../../components/forms/ServiceForm';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { COLORS } from '../../config/constants';
-import { SERVICE_CATEGORIES } from '../../config/services';
+import { Service, ServiceFormData } from '../../src/types';
+import { ServiceService } from '../../src/services/serviceService';
+import { ServiceCard } from '../../src/components/common/ServiceCard';
+import { ServiceForm } from '../../src/components/forms/ServiceForm';
+import { LoadingSpinner } from '../../src/components/common/LoadingSpinner';
+import { COLORS } from '../../src/config/constants';
+import { SERVICE_CATEGORIES } from '../../src/config/services';
 
 export const ServiceSettingsScreen: React.FC = () => {
   const [services, setServices] = useState<Service[]>([]);

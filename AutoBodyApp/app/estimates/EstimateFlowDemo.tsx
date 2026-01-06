@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
 import { Button, Text, Card } from 'react-native-paper';
-import { CustomerIntakeScreen } from './CustomerIntakeScreen';
-import { VisualEstimatorScreen } from './VisualEstimatorScreen';
-import { ReviewEstimateScreen } from './ReviewEstimateScreen';
-import { IntakeResult, VisualEstimate, EstimateReviewData } from '../../types';
-import { EstimateService } from '../../services/estimateService';
-import { COLORS } from '../../config/constants';
+import { CustomerIntakeScreen } from '../../src/screens/estimates/CustomerIntakeScreen';
+import { VisualEstimatorScreen } from '../../src/screens/estimates/VisualEstimatorScreen';
+import { ReviewEstimateScreen } from '../../src/screens/estimates/ReviewEstimateScreen';
+import { IntakeResult, VisualEstimate, EstimateReviewData } from '../../src/types';
+import { EstimateService } from '../../src/services/estimateService';
+import { COLORS } from '../../src/config/constants';
 
 type FlowStep = 'start' | 'intake' | 'visual-estimator' | 'review' | 'complete';
 
