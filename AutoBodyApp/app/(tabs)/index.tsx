@@ -1,98 +1,107 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import React from 'react';
+import { View, StyleSheet, ScrollView } from 'react-native';
+import { Card, Title, Paragraph, Button, FAB } from 'react-native-paper';
+import { router } from 'expo-router';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const handleNewEstimate = () => {
+    // Navigate to EstimateFlowDemo
+    router.push('/estimates/EstimateFlowDemo');
+  };
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const handleServiceSettings = () => {
+    // Navigate to ServiceSettings
+    router.push('/services/ServiceSettingsScreen');
+  };
+
+  return (
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Title style={styles.title}>Auto Body Estimator</Title>
+        
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title>New Estimate</Title>
+            <Paragraph>
+              Create a new estimate for vehicle damage assessment, including customer intake, photo documentation, and invoice generation.
+            </Paragraph>
+            <Button 
+              mode="contained" 
+              onPress={handleNewEstimate}
+              style={styles.button}
+            >
+              Start New Estimate
+            </Button>
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title>Service Management</Title>
+            <Paragraph>
+              Manage your repair services, add new services, edit pricing, and maintain your service catalog.
+            </Paragraph>
+            <Button 
+              mode="outlined" 
+              onPress={handleServiceSettings}
+              style={styles.button}
+            >
+              Manage Services
+            </Button>
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.card}>
+          <Card.Content>
+            <Title>Features</Title>
+            <Paragraph>
+              • Customer and vehicle intake with VIN scanning{'\n'}
+              • Photo-based damage assessment{'\n'}
+              • Service management with Georgian/English support{'\n'}
+              • Professional PDF invoice generation{'\n'}
+              • Firebase cloud storage and database
+            </Paragraph>
+          </Card.Content>
+        </Card>
+      </ScrollView>
+      
+      <FAB
+        icon="plus"
+        style={styles.fab}
+        onPress={handleNewEstimate}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 80, // Space for FAB
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#1976d2',
+  },
+  card: {
+    marginBottom: 16,
+    elevation: 2,
+  },
+  button: {
+    marginTop: 12,
+  },
+  fab: {
     position: 'absolute',
+    margin: 16,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#1976d2',
   },
 });
