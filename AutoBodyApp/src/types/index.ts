@@ -146,3 +146,19 @@ export interface ServiceFormData {
   basePrice: string;
   category: string;
 }
+
+export interface CustomerIntakeFormData {
+  customerName: string;
+  phoneNumber: string;
+  vehicleMake: string;
+  vehicleModel: string;
+  vehicleYear: string;
+  vin: string;
+}
+
+export interface IntakeResult {
+  customerId: string;
+  vehicleId: string;
+  customer: Customer;
+  vehicle: Vehicle;
+}
