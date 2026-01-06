@@ -48,6 +48,19 @@ export interface Part {
   supplier?: string;
 }
 
+export interface Service {
+  id: string;
+  key: string;
+  nameEn: string;
+  nameKa: string;
+  basePrice: number;
+  category: 'bodywork' | 'painting' | 'mechanical' | 'specialized' | 'finishing';
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Estimate {
   id: string;
   customerId: string;
@@ -125,4 +138,11 @@ export interface VehicleFormData {
   vin: string;
   licensePlate: string;
   mileage: string;
+}
+
+export interface ServiceFormData {
+  nameEn: string;
+  nameKa: string;
+  basePrice: string;
+  category: string;
 }
