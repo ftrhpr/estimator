@@ -80,6 +80,31 @@ export interface Estimate {
   expiresAt?: Date;
 }
 
+// Visual Estimate structure for similar repair matching
+export interface VisualEstimate {
+  id: string;
+  vehicleModel: string;
+  damageZone: string;
+  cost: number;
+  imageURL: string;
+  repairType: string[];
+  photoAngle: PhotoAngle;
+  customerId?: string;
+  vehicleId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type PhotoAngle = 'Front' | 'Side' | 'Rear' | 'Damage Close-up';
+
+export interface EstimatePhoto {
+  id: string;
+  url: string;
+  angle: PhotoAngle;
+  damageZone?: string;
+  uploadedAt: Date;
+}
+
 export interface Invoice {
   id: string;
   estimateId: string;
@@ -161,4 +186,41 @@ export interface IntakeResult {
   vehicleId: string;
   customer: Customer;
   vehicle: Vehicle;
+}
+
+export interface InvoiceLineItem {
+  id: string;
+  type: 'service' | 'part';
+  nameEn: string;
+  nameKa: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  damageZone?: string;
+}
+
+export interface InvoiceData {
+  id: string;
+  invoiceNumber: string;
+  customer: Customer;
+  vehicle: Vehicle;
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  notes?: string;
+  createdAt: Date;
+}
+
+export interface EstimateReviewData {
+  customer: Customer;
+  vehicle: Vehicle;
+  visualEstimates: VisualEstimate[];
+  selectedServices: Service[];
+  lineItems: InvoiceLineItem[];
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
 }
