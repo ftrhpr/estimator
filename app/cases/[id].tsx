@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
     Alert,
     Animated,
@@ -26,7 +26,7 @@ import {
     Text,
     TextInput
 } from 'react-native-paper';
-import ReanimatedAnimated, {
+import Reanimated, {
     useSharedValue,
     withSpring,
     withTiming,
@@ -67,12 +67,9 @@ export default function CaseDetailScreen() {
   const [syncing, setSyncing] = useState(false);
 
   // Animation values
-  const headerOpacity = useSharedValue(1);
-  const cardScale = useSharedValue(1);
-  const fabScale = useSharedValue(1);
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
-  const fadeAnim = new Animated.Value(0);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadCaseDetails();
@@ -82,14 +79,6 @@ export default function CaseDetailScreen() {
       useNativeDriver: true,
     }).start();
   }, [id]);
-
-  // Animated styles
-  const headerAnimatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: headerOpacity.value,
-      transform: [{ translateY: interpolate(headerOpacity.value, [0, 1], [-50, 0]) }],
-    };
-  });
 
   const getServiceNameGeorgian = (serviceName: string): string => {
     if (!serviceName) return '';
@@ -448,36 +437,34 @@ export default function CaseDetailScreen() {
   return (
     <View style={styles.container}>
       {/* Modern Gradient Header */}
-      <ReanimatedAnimated.View style={[styles.headerGradient, headerAnimatedStyle]}>
-        <Surface style={styles.header} elevation={4}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <View style={styles.backButtonCircle}>
-                <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.primary} />
-              </View>
-            </TouchableOpacity>
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {caseData.carModel || 'Unknown'}
-              </Text>
-              <Text style={styles.headerSubtitle}>#{id.toString().slice(0, 8).toUpperCase()}</Text>
+      <Surface style={styles.header} elevation={4}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <View style={styles.backButtonCircle}>
+              <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.primary} />
             </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                onPress={handleSyncFromCPanel}
-                disabled={syncing}
-                style={[styles.syncButton, syncing && styles.syncButtonDisabled]}
-              >
-                <MaterialCommunityIcons
-                  name="sync"
-                  size={20}
-                  color={syncing ? COLORS.text.disabled : COLORS.primary}
-                />
-              </TouchableOpacity>
-            </View>
+          </TouchableOpacity>
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {caseData.carModel || 'Unknown'}
+            </Text>
+            <Text style={styles.headerSubtitle}>#{id.toString().slice(0, 8).toUpperCase()}</Text>
           </View>
-        </Surface>
-      </ReanimatedAnimated.View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={handleSyncFromCPanel}
+              disabled={syncing}
+              style={[styles.syncButton, syncing && styles.syncButtonDisabled]}
+            >
+              <MaterialCommunityIcons
+                name="sync"
+                size={20}
+                color={syncing ? COLORS.text.disabled : COLORS.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Surface>
 
       <ScrollView
         style={styles.scrollView}
@@ -689,7 +676,7 @@ export default function CaseDetailScreen() {
                               onPress={() => handleDeleteService(index)}
                               style={styles.deleteButton}
                             >
-                              <MaterialCommunityIcons icon="delete" size={20} color={COLORS.error} />
+                              <MaterialCommunityIcons name="delete" size={20} color={COLORS.error} />
                             </TouchableOpacity>
                           </View>
                         </View>
@@ -998,7 +985,7 @@ export default function CaseDetailScreen() {
                     }
                   }}
                 >
-                  <ReanimatedAnimated.View
+                  <Reanimated.View
                     style={[
                       styles.imageWrapper,
                       {
@@ -1092,7 +1079,7 @@ export default function CaseDetailScreen() {
                             );
                           })
                       )}
-                  </ReanimatedAnimated.View>
+                  </Reanimated.View>
                 </PinchGestureHandler>
               </View>
 
@@ -1157,9 +1144,6 @@ const styles = StyleSheet.create({
   },
 
   // Modern Header
-  headerGradient: {
-    zIndex: 10,
-  },
   header: {
     backgroundColor: '#fff',
     paddingTop: 50,
