@@ -394,7 +394,32 @@ export default function CaseDetailScreen() {
         count: parseInt(newServiceCount) || 1,
       };
 
-      const updatedServices = [...(caseData.services || []), newService];
+      // Check if service already exists and combine if it does
+      const existingServices = [...(caseData.services || [])];
+      const existingServiceIndex = existingServices.findIndex(s => {
+        const normalized = normalizeService(s);
+        return normalized.serviceName.toLowerCase() === newService.serviceName.toLowerCase();
+      });
+
+      let updatedServices;
+      if (existingServiceIndex !== -1) {
+        // Service exists - combine quantities and add prices
+        const existingService = existingServices[existingServiceIndex];
+        const normalized = normalizeService(existingService);
+
+        updatedServices = [...existingServices];
+        updatedServices[existingServiceIndex] = {
+          ...existingService,
+          count: normalized.count + newService.count,
+          price: normalized.price + newService.price,
+        };
+
+        console.log(`[Case Detail] Combined duplicate service: ${newService.serviceName} (${normalized.count} + ${newService.count} = ${normalized.count + newService.count})`);
+      } else {
+        // New service - add to list
+        updatedServices = [...existingServices, newService];
+      }
+
       const newTotal = updatedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
 
       await updateInspection(id as string, {
