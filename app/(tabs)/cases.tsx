@@ -1,0 +1,721 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import {
+    Alert,
+    Dimensions,
+    FlatList,
+    Linking,
+    RefreshControl,
+    StyleSheet,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import {
+    ActivityIndicator,
+    Button,
+    Card,
+    Chip,
+    Divider,
+    FAB,
+    IconButton,
+    Menu,
+    Searchbar,
+    Surface,
+    Text,
+} from 'react-native-paper';
+
+import { COLORS } from '../../src/config/constants';
+import { DEFAULT_SERVICES } from '../../src/config/services';
+import { deleteInspection, getAllInspections } from '../../src/services/firebase';
+import { formatCurrencyGEL } from '../../src/utils/helpers';
+
+const { width } = Dimensions.get('window');
+
+// Status colors based on case age
+const STATUS_COLORS = {
+  today: '#10B981',
+  recent: '#F59E0B',
+  old: '#EF4444',
+};
+
+interface InspectionCase {
+  id: string;
+  customerName?: string;
+  customerPhone: string;
+  carModel?: string;
+  totalPrice: number;
+  services?: Array<{ serviceName: string; price: number; count: number }>;
+  parts?: any[];
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CaseWithDetails extends InspectionCase {
+  statusColor: string;
+  statusLabel: string;
+}
+
+export default function CasesScreen() {
+  const [cases, setCases] = useState<CaseWithDetails[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterMenuVisible, setFilterMenuVisible] = useState(false);
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'cost_high' | 'cost_low'>('newest');
+  const [showSearch, setShowSearch] = useState(false);
+
+  const loadCases = async () => {
+    try {
+      setLoading(true);
+      const inspections = await getAllInspections();
+      
+      const casesWithDetails: CaseWithDetails[] = inspections.map((inspection: any) => ({
+        id: inspection.id,
+        customerName: inspection.customerName || 'N/A',
+        customerPhone: inspection.customerPhone || 'N/A',
+        carModel: inspection.carModel || 'Unknown',
+        totalPrice: inspection.totalPrice || 0,
+        services: inspection.services || [],
+        parts: inspection.parts || [],
+        status: inspection.status || 'Pending',
+        createdAt: inspection.createdAt,
+        updatedAt: inspection.updatedAt,
+        statusColor: getStatusColor(inspection.createdAt),
+        statusLabel: getStatusLabel(inspection.createdAt),
+      }));
+
+      setCases(casesWithDetails);
+    } catch (error) {
+      console.error('Error loading cases:', error);
+      Alert.alert('Connection Error', 'Unable to load cases.');
+      setCases([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadCases();
+    setRefreshing(false);
+  };
+
+  const handleDeleteCase = async (caseId: string, customerName: string) => {
+    Alert.alert(
+      '🗑️ წაშლა',
+      `ნამდვილად წავშალოთ "${customerName}"?`,
+      [
+        { text: 'გაუქმება', style: 'cancel' },
+        {
+          text: 'წაშლა',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteInspection(caseId);
+              setCases(prevCases => prevCases.filter(c => c.id !== caseId));
+            } catch (error) {
+              console.error('Error deleting case:', error);
+              Alert.alert('Error', 'Failed to delete case');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getServiceNameGeorgian = (serviceName: string): string => {
+    if (!serviceName) return '';
+    
+    for (const key of Object.keys(DEFAULT_SERVICES)) {
+      const service = DEFAULT_SERVICES[key as keyof typeof DEFAULT_SERVICES];
+      if (service.nameEn.toLowerCase() === serviceName.toLowerCase()) {
+        return service.nameKa;
+      }
+    }
+    return serviceName;
+  };
+
+  const normalizeService = (service: any) => {
+    return {
+      serviceName: service.serviceName || service.description || service.name || 'Unknown',
+      serviceNameKa: service.serviceNameKa || service.nameKa || '',
+      price: service.price || service.hourly_rate || service.rate || 0,
+      count: service.count || 1,
+    };
+  };
+
+  // Load cases when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadCases();
+    }, [])
+  );
+
+  const getStatusColor = (createdAt: Date): string => {
+    const daysSinceCreated = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysSinceCreated <= 1) return COLORS.success;
+    if (daysSinceCreated <= 7) return COLORS.warning;
+    return COLORS.error;
+  };
+
+  const getStatusLabel = (createdAt: Date): string => {
+    const daysSinceCreated = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (daysSinceCreated === 0) return 'დღეს';
+    if (daysSinceCreated === 1) return 'გუშინ';
+    if (daysSinceCreated <= 7) return `${daysSinceCreated} დღის წინ`;
+    if (daysSinceCreated <= 30) return `${Math.floor(daysSinceCreated / 7)} კვირის წინ`;
+    return `${Math.floor(daysSinceCreated / 30)} თვის წინ`;
+  };
+
+  const filterAndSortCases = () => {
+    let filteredCases = cases.filter(caseItem => {
+      const searchLower = searchQuery.toLowerCase();
+      return (
+        (caseItem.carModel?.toLowerCase() || '').includes(searchLower) ||
+        (caseItem.customerName?.toLowerCase() || '').includes(searchLower) ||
+        (caseItem.customerPhone?.toLowerCase() || '').includes(searchLower) ||
+        (caseItem.services?.some(s => s.serviceName.toLowerCase().includes(searchLower)) || false)
+      );
+    });
+
+    // Sort cases
+    filteredCases.sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case 'oldest':
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case 'cost_high':
+          return b.totalPrice - a.totalPrice;
+        case 'cost_low':
+          return a.totalPrice - b.totalPrice;
+        default:
+          return 0;
+      }
+    });
+
+    return filteredCases;
+  };
+
+  const renderCaseCard = ({ item }: { item: CaseWithDetails }) => (
+    <TouchableOpacity
+      onPress={() => router.push({ pathname: '/cases/[id]', params: { id: item.id } })}
+      activeOpacity={0.7}
+      style={styles.cardTouchable}
+    >
+      <Card style={styles.caseCard} mode="elevated">
+        {/* Color accent based on age */}
+        <View style={[styles.cardAccent, { backgroundColor: item.statusColor }]} />
+        
+        <Card.Content style={styles.cardContent}>
+          {/* Top Row: Vehicle + Price */}
+          <View style={styles.cardTopRow}>
+            <View style={styles.vehicleInfo}>
+              <View style={[styles.vehicleIcon, { backgroundColor: item.statusColor + '20' }]}>
+                <MaterialCommunityIcons name="car" size={24} color={item.statusColor} />
+              </View>
+              <View style={styles.vehicleDetails}>
+                <Text style={styles.vehicleModel} numberOfLines={1}>
+                  {item.carModel || 'Unknown Vehicle'}
+                </Text>
+                <Text style={styles.customerNameText} numberOfLines={1}>
+                  {item.customerName}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.priceContainer}>
+              <Text style={styles.priceValue}>{formatCurrencyGEL(item.totalPrice)}</Text>
+              <Chip
+                style={[styles.timeChip, { backgroundColor: item.statusColor + '20' }]}
+                textStyle={[styles.timeChipText, { color: item.statusColor }]}
+                compact
+              >
+                {item.statusLabel}
+              </Chip>
+            </View>
+          </View>
+
+          {/* Middle Row: Phone */}
+          <View style={styles.phoneRow}>
+            <MaterialCommunityIcons name="phone" size={16} color={COLORS.text.secondary} />
+            <Text style={styles.phoneText}>{item.customerPhone}</Text>
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusText}>{item.status}</Text>
+            </View>
+          </View>
+
+          {/* Services Row */}
+          {item.services && item.services.length > 0 && (
+            <View style={styles.servicesRow}>
+              {item.services.slice(0, 2).map((service, index) => {
+                const normalized = normalizeService(service);
+                return (
+                  <Chip
+                    key={index}
+                    mode="flat"
+                    compact
+                    style={styles.serviceChip}
+                    textStyle={styles.serviceChipText}
+                  >
+                    {normalized.serviceNameKa || getServiceNameGeorgian(normalized.serviceName)}
+                  </Chip>
+                );
+              })}
+              {item.services.length > 2 && (
+                <Chip mode="flat" compact style={styles.moreChip} textStyle={styles.moreChipText}>
+                  +{item.services.length - 2}
+                </Chip>
+              )}
+            </View>
+          )}
+
+          {/* Action Row - One-handed friendly at bottom */}
+          <View style={styles.cardActions}>
+            <TouchableOpacity 
+              style={styles.cardActionButton}
+              onPress={() => {
+                const cleanPhone = item.customerPhone.replace(/\D/g, '');
+                const whatsappPhone = cleanPhone.startsWith('995') ? cleanPhone : `995${cleanPhone}`;
+                Linking.openURL(`whatsapp://send?phone=${whatsappPhone}`);
+              }}
+            >
+              <MaterialCommunityIcons name="whatsapp" size={22} color="#25D366" />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.cardActionButton}
+              onPress={() => Linking.openURL(`tel:${item.customerPhone}`)}
+            >
+              <MaterialCommunityIcons name="phone-outline" size={22} color={COLORS.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.cardActionButton, styles.deleteAction]}
+              onPress={() => handleDeleteCase(item.id, item.customerName || 'Customer')}
+            >
+              <MaterialCommunityIcons name="trash-can-outline" size={22} color={COLORS.error} />
+            </TouchableOpacity>
+          </View>
+        </Card.Content>
+      </Card>
+    </TouchableOpacity>
+  );
+
+  const getSortLabel = () => {
+    switch (sortBy) {
+      case 'newest': return 'უახლესი';
+      case 'oldest': return 'ძველი';
+      case 'cost_high': return 'მაღალი';
+      case 'cost_low': return 'დაბალი';
+      default: return 'Sort';
+    }
+  };
+
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>იტვირთება...</Text>
+      </View>
+    );
+  }
+
+  const filteredCases = filterAndSortCases();
+  const totalValue = filteredCases.reduce((sum, item) => sum + item.totalPrice, 0);
+
+  return (
+    <View style={styles.container}>
+      {/* Compact Header */}
+      <Surface style={styles.header} elevation={2}>
+        <View style={styles.headerTop}>
+          <Text style={styles.headerTitle}>საქმეები</Text>
+          <View style={styles.headerActions}>
+            <IconButton
+              icon={showSearch ? "close" : "magnify"}
+              size={24}
+              onPress={() => setShowSearch(!showSearch)}
+              iconColor={COLORS.text.primary}
+            />
+            <Menu
+              visible={filterMenuVisible}
+              onDismiss={() => setFilterMenuVisible(false)}
+              anchor={
+                <IconButton
+                  icon="sort-variant"
+                  size={24}
+                  onPress={() => setFilterMenuVisible(true)}
+                  iconColor={COLORS.text.primary}
+                />
+              }
+            >
+              <Menu.Item
+                title="უახლესი"
+                onPress={() => { setSortBy('newest'); setFilterMenuVisible(false); }}
+                leadingIcon={sortBy === 'newest' ? 'check' : undefined}
+              />
+              <Menu.Item
+                title="ძველი"
+                onPress={() => { setSortBy('oldest'); setFilterMenuVisible(false); }}
+                leadingIcon={sortBy === 'oldest' ? 'check' : undefined}
+              />
+              <Divider />
+              <Menu.Item
+                title="მაღალი ფასი"
+                onPress={() => { setSortBy('cost_high'); setFilterMenuVisible(false); }}
+                leadingIcon={sortBy === 'cost_high' ? 'check' : undefined}
+              />
+              <Menu.Item
+                title="დაბალი ფასი"
+                onPress={() => { setSortBy('cost_low'); setFilterMenuVisible(false); }}
+                leadingIcon={sortBy === 'cost_low' ? 'check' : undefined}
+              />
+            </Menu>
+          </View>
+        </View>
+
+        {/* Search - Collapsible */}
+        {showSearch && (
+          <Searchbar
+            placeholder="ძიება..."
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            style={styles.searchBar}
+            inputStyle={styles.searchInput}
+            iconColor={COLORS.text.secondary}
+          />
+        )}
+
+        {/* Stats Row */}
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{filteredCases.length}</Text>
+            <Text style={styles.statLabel}>საქმე</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{formatCurrencyGEL(totalValue)}</Text>
+            <Text style={styles.statLabel}>ჯამი</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Chip compact style={styles.sortChip} textStyle={styles.sortChipText}>
+              {getSortLabel()}
+            </Chip>
+          </View>
+        </View>
+      </Surface>
+
+      {/* Cases List */}
+      {filteredCases.length === 0 ? (
+        <View style={styles.emptyState}>
+          <MaterialCommunityIcons name="folder-open-outline" size={80} color={COLORS.text.disabled} />
+          <Text style={styles.emptyTitle}>
+            {searchQuery ? 'არ მოიძებნა' : 'არ არის საქმეები'}
+          </Text>
+          <Text style={styles.emptySubtitle}>
+            {searchQuery ? 'შეცვალეთ ძიების პარამეტრები' : 'დაამატეთ პირველი ავტომობილი'}
+          </Text>
+          {!searchQuery && (
+            <Button
+              mode="contained"
+              onPress={() => router.push('/capture/QuickCaptureScreen')}
+              style={styles.emptyButton}
+              icon="camera-plus"
+            >
+              ახალი ავტო
+            </Button>
+          )}
+        </View>
+      ) : (
+        <FlatList
+          data={filteredCases}
+          renderItem={renderCaseCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[COLORS.primary]}
+            />
+          }
+        />
+      )}
+
+      {/* FAB - Bottom right for thumb reach */}
+      <FAB
+        icon="camera-plus"
+        style={styles.fab}
+        onPress={() => router.push('/capture/QuickCaptureScreen')}
+        label="ახალი"
+        color="#fff"
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+  },
+  loadingText: {
+    marginTop: 16,
+    color: COLORS.text.secondary,
+    fontSize: 16,
+  },
+  
+  // Header
+  header: {
+    backgroundColor: '#fff',
+    paddingTop: 50,
+    paddingBottom: 12,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.text.primary,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  searchBar: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    elevation: 0,
+    backgroundColor: '#F1F5F9',
+    height: 44,
+  },
+  searchInput: {
+    fontSize: 15,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    alignItems: 'center',
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: '#E2E8F0',
+  },
+  sortChip: {
+    backgroundColor: COLORS.primary + '15',
+    height: 28,
+  },
+  sortChipText: {
+    fontSize: 12,
+    color: COLORS.primary,
+  },
+
+  // List
+  listContent: {
+    padding: 16,
+    paddingBottom: 120,
+  },
+  cardTouchable: {
+    marginBottom: 12,
+  },
+  caseCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  cardAccent: {
+    height: 5,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  cardContent: {
+    padding: 16,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  vehicleInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  vehicleIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  vehicleDetails: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  vehicleModel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  customerNameText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  priceContainer: {
+    alignItems: 'flex-end',
+  },
+  priceValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  timeChip: {
+    marginTop: 4,
+    height: 26,
+  },
+  timeChipText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  phoneText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    marginLeft: 8,
+    flex: 1,
+  },
+  statusBadge: {
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  servicesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  serviceChip: {
+    backgroundColor: '#EEF2FF',
+    height: 28,
+  },
+  serviceChipText: {
+    fontSize: 12,
+    color: '#4F46E5',
+  },
+  moreChip: {
+    backgroundColor: '#F1F5F9',
+    height: 28,
+  },
+  moreChipText: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+  },
+  
+  // Card Actions - Bottom for one-handed use
+  cardActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 8,
+  },
+  cardActionButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteAction: {
+    backgroundColor: '#FEF2F2',
+  },
+
+  // Empty State
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  emptyButton: {
+    marginTop: 24,
+    borderRadius: 12,
+  },
+
+  // FAB
+  fab: {
+    position: 'absolute',
+    right: 16,
+    bottom: 32,
+    backgroundColor: COLORS.primary,
+    borderRadius: 16,
+    elevation: 6,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+});

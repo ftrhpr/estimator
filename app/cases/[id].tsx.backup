@@ -1,0 +1,1608 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    Alert,
+    Dimensions,
+    Image,
+    Linking,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { GestureHandlerRootView, PinchGestureHandler, State } from 'react-native-gesture-handler';
+import {
+    ActivityIndicator,
+    Button,
+    Card,
+    Chip,
+    Divider,
+    IconButton,
+    Portal,
+    Surface,
+    Text,
+    TextInput
+} from 'react-native-paper';
+import Animated, {
+    useSharedValue,
+    withSpring
+} from 'react-native-reanimated';
+
+import { COLORS } from '../../src/config/constants';
+import { DEFAULT_SERVICES } from '../../src/config/services';
+import { ServiceService } from '../../src/services/serviceService';
+import { formatCurrencyGEL } from '../../src/utils/helpers';
+
+const { width, height } = Dimensions.get('window');
+
+export default function CaseDetailScreen() {
+  const { id } = useLocalSearchParams();
+  const [loading, setLoading] = useState(true);
+  const [caseData, setCaseData] = useState<any>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editedServices, setEditedServices] = useState<any[]>([]);
+  const [selectedImage, setSelectedImage] = useState<any>(null);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [editCustomerMode, setEditCustomerMode] = useState(false);
+  const [editedCustomerName, setEditedCustomerName] = useState('');
+  const [editedCustomerPhone, setEditedCustomerPhone] = useState('');
+  const [editedCarModel, setEditedCarModel] = useState('');
+  const [showAddServiceModal, setShowAddServiceModal] = useState(false);
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServicePrice, setNewServicePrice] = useState('');
+  const [newServiceCount, setNewServiceCount] = useState('1');
+  const [availableServices, setAvailableServices] = useState<any[]>([]);
+  const [loadingServices, setLoadingServices] = useState(false);
+  const [selectedService, setSelectedService] = useState<any>(null);
+  const [imageScale, setImageScale] = useState(1);
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
+  const [actualImageSize, setActualImageSize] = useState({ width: 0, height: 0 });
+  const [cpanelInvoiceId, setCpanelInvoiceId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+
+  // Helper function to get service name in Georgian
+  const getServiceNameGeorgian = (serviceName: string): string => {
+    if (!serviceName) return '';
+    
+    // Try exact match first
+    for (const key of Object.keys(DEFAULT_SERVICES)) {
+      const service = DEFAULT_SERVICES[key as keyof typeof DEFAULT_SERVICES];
+      if (service.nameEn.toLowerCase() === serviceName.toLowerCase()) {
+        return service.nameKa;
+      }
+    }
+    
+    // Fallback - return original name if no match
+    return serviceName;
+  };
+
+  // Helper function to normalize service object
+  const normalizeService = (service: any) => {
+    return {
+      serviceName: service.serviceName || service.description || service.name || 'Unknown Service',
+      price: service.price || service.hourly_rate || service.rate || 0,
+      count: service.count || 1,
+    };
+  };
+
+  // Helper function to get total service count
+  const getTotalServiceCount = (services: any[]) => {
+    return services?.reduce((sum: number, s: any) => {
+      const normalized = normalizeService(s);
+      return sum + (normalized.count || 1);
+    }, 0) || 0;
+  };
+
+  // Helper function to get cPanel invoice ID from API if not cached
+  const getCPanelInvoiceId = async (): Promise<string | null> => {
+    try {
+      if (!id || cpanelInvoiceId) {
+        return cpanelInvoiceId || null;
+      }
+      
+      console.log('[Case Detail] Fetching cPanel invoice ID for Firebase ID:', id);
+      
+      const { fetchCPanelInvoiceId } = require('../../src/services/cpanelService');
+      const result = await fetchCPanelInvoiceId(id as string);
+      
+      if (result) {
+        console.log('[Case Detail] Retrieved cPanel invoice ID:', result);
+        setCpanelInvoiceId(result);
+        return result;
+      }
+      return null;
+    } catch (error) {
+      console.error('[Case Detail] Error fetching cPanel invoice ID:', error);
+      return null;
+    }
+  };
+
+  // Sync data from cPanel back to mobile app
+  const handleSyncFromCPanel = async () => {
+    try {
+      setSyncing(true);
+      
+      // Get cPanel ID
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      
+      if (!cpanelId) {
+        Alert.alert('Sync Not Available', 'This case has not been synced to cPanel yet.');
+        return;
+      }
+      
+      console.log('[Case Detail] Syncing from cPanel, ID:', cpanelId);
+      
+      const { fetchInvoiceFromCPanel } = require('../../src/services/cpanelService');
+      const cpanelData = await fetchInvoiceFromCPanel(cpanelId);
+      
+      if (!cpanelData) {
+        Alert.alert('Sync Failed', 'Could not fetch data from cPanel. The invoice may have been deleted.');
+        return;
+      }
+      
+      // Update local state with cPanel data
+      const updatedData = {
+        ...caseData,
+        customerName: cpanelData.customerName || caseData.customerName,
+        customerPhone: cpanelData.customerPhone || caseData.customerPhone,
+        carModel: cpanelData.carModel || caseData.carModel,
+        totalPrice: cpanelData.totalPrice || caseData.totalPrice,
+        status: cpanelData.status || caseData.status,
+        services: cpanelData.services || caseData.services,
+      };
+      
+      // Update Firebase with cPanel data
+      const { updateInspection } = require('../../src/services/firebase');
+      await updateInspection(id as string, {
+        customerName: updatedData.customerName,
+        customerPhone: updatedData.customerPhone,
+        carModel: updatedData.carModel,
+        totalPrice: updatedData.totalPrice,
+        status: updatedData.status,
+        services: updatedData.services,
+      }); // Don't pass cPanel ID here to avoid syncing back
+      
+      setCaseData(updatedData);
+      setEditedServices(updatedData.services || []);
+      setEditedCustomerName(updatedData.customerName || '');
+      setEditedCustomerPhone(updatedData.customerPhone || '');
+      setEditedCarModel(updatedData.carModel || '');
+      
+      Alert.alert('Sync Complete', 'Data has been synced from cPanel successfully.');
+    } catch (error) {
+      console.error('[Case Detail] Error syncing from cPanel:', error);
+      Alert.alert('Sync Error', 'Failed to sync data from cPanel.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCaseDetails();
+  }, [id]);
+
+  const loadCaseDetails = async () => {
+    try {
+      setLoading(true);
+      // Import the function dynamically
+      const { db } = require('../../src/services/firebase');
+      const { doc, getDoc } = require('firebase/firestore');
+      
+      const docRef = doc(db, 'inspections', id as string);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = { id: docSnap.id, ...docSnap.data() };
+        setCaseData(data);
+        setEditedServices(data.services || []);
+        setEditedCustomerName(data.customerName || '');
+        setEditedCustomerPhone(data.customerPhone || '');
+        setEditedCarModel(data.carModel || '');
+        // Extract cPanel invoice ID if available
+        if (data.cpanelInvoiceId) {
+          setCpanelInvoiceId(data.cpanelInvoiceId);
+          console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
+        }
+      } else {
+        Alert.alert('Error', 'Case not found');
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error loading case:', error);
+      Alert.alert('Error', 'Failed to load case details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWhatsAppShare = async () => {
+    if (!caseData) return;
+
+    const message = `🚗 Invoice #${id.slice(0, 8)}\n\n` +
+      `📋 Customer: ${caseData.customerName || 'N/A'}\n` +
+      `🚙 Vehicle: ${caseData.carModel || 'Unknown'}\n` +
+      `💰 Total: ${formatCurrencyGEL(caseData.totalPrice)}\n\n` +
+      `Services:\n` +
+      (caseData.services || []).map((s: any) => {
+        const normalized = normalizeService(s);
+        return `• ${getServiceNameGeorgian(normalized.serviceName)} ${normalized.count > 1 ? `x${normalized.count}` : ''} - ${formatCurrencyGEL(normalized.price)}`;
+      }).join('\n');
+
+    const cleanPhone = caseData.customerPhone.replace(/\D/g, '');
+    const whatsappPhone = cleanPhone.startsWith('995') ? cleanPhone : `995${cleanPhone}`;
+    const whatsappUrl = `whatsapp://send?phone=${whatsappPhone}&text=${encodeURIComponent(message)}`;
+    
+    const canOpen = await Linking.canOpenURL(whatsappUrl);
+    if (canOpen) {
+      await Linking.openURL(whatsappUrl);
+    } else {
+      Alert.alert('WhatsApp Not Available', 'Please install WhatsApp to send invoices');
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: string) => {
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      
+      // Get cPanel ID if available
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      
+      console.log('[Case Detail] Updating status with cPanel ID:', cpanelId);
+      
+      await updateInspection(id as string, { status: newStatus }, cpanelId || undefined);
+      setCaseData({ ...caseData, status: newStatus });
+      Alert.alert('Success', `Status updated to ${newStatus}`);
+    } catch (error) {
+      console.error('Error updating status:', error);
+      Alert.alert('Error', 'Failed to update status');
+    }
+  };
+
+  const handleEditToggle = () => {
+    if (editMode) {
+      // Cancel edit
+      setEditedServices(caseData.services || []);
+    }
+    setEditMode(!editMode);
+  };
+
+  const handleSaveChanges = async () => {
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      const newTotal = editedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
+      
+      // Get cPanel ID if available
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      
+      console.log('[Case Detail] Saving with cPanel ID:', cpanelId);
+      
+      await updateInspection(id as string, { 
+        services: editedServices,
+        totalPrice: newTotal 
+      }, cpanelId || undefined);
+      
+      setCaseData({ ...caseData, services: editedServices, totalPrice: newTotal });
+      setEditMode(false);
+      Alert.alert('Success', 'Invoice updated successfully');
+    } catch (error) {
+      console.error('Error updating invoice:', error);
+      Alert.alert('Error', 'Failed to update invoice');
+    }
+  };
+
+  const handleServicePriceChange = (index: number, newPrice: string) => {
+    const updated = [...editedServices];
+    const price = parseFloat(newPrice) || 0;
+    updated[index] = { ...updated[index], price };
+    setEditedServices(updated);
+  };
+
+  const handleDeleteService = (index: number) => {
+    Alert.alert(
+      'Delete Service',
+      'Are you sure you want to remove this service?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            const updated = editedServices.filter((_, i) => i !== index);
+            setEditedServices(updated);
+          }
+        }
+      ]
+    );
+  };
+
+  const handleImagePress = (photo: any) => {
+    setSelectedImage(photo);
+    setShowImageModal(true);
+  };
+
+  const handleCustomerEditToggle = () => {
+    if (editCustomerMode) {
+      // Cancel edit
+      setEditedCustomerName(caseData.customerName || '');
+      setEditedCustomerPhone(caseData.customerPhone || '');
+      setEditedCarModel(caseData.carModel || '');
+    }
+    setEditCustomerMode(!editCustomerMode);
+  };
+
+  const loadAvailableServices = async () => {
+    try {
+      setLoadingServices(true);
+      const services = await ServiceService.getAllServices();
+      setAvailableServices(services);
+    } catch (error) {
+      console.error('Error loading services:', error);
+      Alert.alert('Error', 'Failed to load services from database');
+      setAvailableServices([]);
+    } finally {
+      setLoadingServices(false);
+    }
+  };
+
+  const handleOpenAddServiceModal = () => {
+    setShowAddServiceModal(true);
+    if (availableServices.length === 0) {
+      loadAvailableServices();
+    }
+  };
+
+  const handleSelectServiceFromDB = (service: any) => {
+    setSelectedService(service);
+    setNewServiceName(service.nameEn);
+    setNewServicePrice(service.basePrice.toString());
+  };
+
+  const handleSaveCustomerInfo = async () => {
+    if (!editedCustomerName.trim() || !editedCustomerPhone.trim()) {
+      Alert.alert('Validation Error', 'Customer name and phone are required');
+      return;
+    }
+
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      
+      // Get cPanel ID if available
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      
+      console.log('[Case Detail] Saving customer info with cPanel ID:', cpanelId);
+      
+      await updateInspection(id as string, { 
+        customerName: editedCustomerName,
+        customerPhone: editedCustomerPhone,
+        carModel: editedCarModel
+      }, cpanelId || undefined);
+      
+      setCaseData({ 
+        ...caseData, 
+        customerName: editedCustomerName,
+        customerPhone: editedCustomerPhone,
+        carModel: editedCarModel
+      });
+      setEditCustomerMode(false);
+      Alert.alert('Success', 'Customer information updated successfully');
+    } catch (error) {
+      console.error('Error updating customer info:', error);
+      Alert.alert('Error', 'Failed to update customer information');
+    }
+  };
+
+  const handleAddService = async () => {
+    if (!newServiceName.trim() || !newServicePrice.trim()) {
+      Alert.alert('Validation Error', 'Service name and price are required');
+      return;
+    }
+
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      
+      // Get cPanel ID if available
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      
+      console.log('[Case Detail] Adding service with cPanel ID:', cpanelId);
+      
+      const newService = {
+        serviceName: newServiceName,
+        serviceNameKa: selectedService?.nameKa || getServiceNameGeorgian(newServiceName),
+        price: parseFloat(newServicePrice) || 0,
+        count: parseInt(newServiceCount) || 1,
+      };
+
+      const updatedServices = [...(caseData.services || []), newService];
+      const newTotal = updatedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
+
+      await updateInspection(id as string, {
+        services: updatedServices,
+        totalPrice: newTotal,
+      }, cpanelId || undefined);
+
+      setCaseData({ ...caseData, services: updatedServices, totalPrice: newTotal });
+      setEditedServices(updatedServices);
+      setShowAddServiceModal(false);
+      setNewServiceName('');
+      setNewServicePrice('');
+      setNewServiceCount('1');
+      setSelectedService(null);
+      Alert.alert('Success', 'Service added successfully');
+    } catch (error) {
+      console.error('Error adding service:', error);
+      Alert.alert('Error', 'Failed to add service');
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>იტვირთება...</Text>
+      </View>
+    );
+  }
+
+  if (!caseData) {
+    return null;
+  }
+
+  const totalServices = getTotalServiceCount(caseData.services || []);
+  const currentTotal = editMode 
+    ? editedServices.reduce((sum, s) => sum + (s.price || 0), 0)
+    : caseData.totalPrice;
+
+  return (
+    <View style={styles.container}>
+      {/* Compact Header */}
+      <Surface style={styles.header} elevation={2}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <MaterialCommunityIcons name="arrow-left" size={24} color={COLORS.text.primary} />
+          </TouchableOpacity>
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {caseData.carModel || 'Unknown'}
+            </Text>
+            <Text style={styles.headerSubtitle}>#{id.toString().slice(0, 8).toUpperCase()}</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <IconButton
+              icon="sync"
+              size={22}
+              onPress={handleSyncFromCPanel}
+              disabled={syncing}
+              iconColor={syncing ? COLORS.text.disabled : COLORS.primary}
+            />
+          </View>
+        </View>
+      </Surface>
+
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Quick Status + Total Card */}
+        <Card style={styles.statusCard}>
+          <Card.Content>
+            <View style={styles.statusRow}>
+              <View style={styles.statusInfo}>
+                <Chip 
+                  mode="flat" 
+                  style={styles.statusChip}
+                  textStyle={styles.statusChipText}
+                  icon="file-document"
+                >
+                  {caseData.status}
+                </Chip>
+                <Text style={styles.customerPhone}>{caseData.customerPhone}</Text>
+              </View>
+              <View style={styles.totalContainer}>
+                <Text style={styles.totalLabel}>ჯამი</Text>
+                <Text style={styles.totalValue}>{formatCurrencyGEL(currentTotal)}</Text>
+              </View>
+            </View>
+          </Card.Content>
+        </Card>
+
+        {/* Customer Info - Compact */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>მომხმარებელი</Text>
+              <IconButton
+                icon={editCustomerMode ? "close" : "pencil"}
+                size={20}
+                onPress={handleCustomerEditToggle}
+                iconColor={editCustomerMode ? COLORS.error : COLORS.primary}
+              />
+            </View>
+            
+            {editCustomerMode ? (
+              <View>
+                <TextInput
+                  label="სახელი *"
+                  value={editedCustomerName}
+                  onChangeText={setEditedCustomerName}
+                  mode="outlined"
+                  style={styles.customerInput}
+                  left={<TextInput.Icon icon="account" />}
+                />
+                <TextInput
+                  label="ტელეფონი *"
+                  value={editedCustomerPhone}
+                  onChangeText={setEditedCustomerPhone}
+                  mode="outlined"
+                  keyboardType="phone-pad"
+                  style={styles.customerInput}
+                  left={<TextInput.Icon icon="phone" />}
+                />
+                <TextInput
+                  label="ავტომობილი"
+                  value={editedCarModel}
+                  onChangeText={setEditedCarModel}
+                  mode="outlined"
+                  style={styles.customerInput}
+                  left={<TextInput.Icon icon="car" />}
+                />
+                <View style={styles.editActions}>
+                  <Button mode="outlined" onPress={handleCustomerEditToggle} style={styles.editButton}>
+                    გაუქმება
+                  </Button>
+                  <Button mode="contained" onPress={handleSaveCustomerInfo} style={styles.editButton}>
+                    შენახვა
+                  </Button>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.customerInfoCompact}>
+                <TouchableOpacity style={styles.infoRow} onPress={() => Linking.openURL(`tel:${caseData.customerPhone}`)}>
+                  <MaterialCommunityIcons name="account" size={20} color={COLORS.primary} />
+                  <Text style={styles.infoText}>{caseData.customerName || 'N/A'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.infoRow} onPress={() => {
+                  const cleanPhone = caseData.customerPhone.replace(/\D/g, '');
+                  const whatsappPhone = cleanPhone.startsWith('995') ? cleanPhone : `995${cleanPhone}`;
+                  Linking.openURL(`whatsapp://send?phone=${whatsappPhone}`);
+                }}>
+                  <MaterialCommunityIcons name="whatsapp" size={20} color="#25D366" />
+                  <Text style={styles.infoText}>{caseData.customerPhone}</Text>
+                </TouchableOpacity>
+                <View style={styles.infoRow}>
+                  <MaterialCommunityIcons name="car" size={20} color={COLORS.primary} />
+                  <Text style={styles.infoText}>{caseData.carModel || 'Unknown'}</Text>
+                </View>
+              </View>
+            )}
+          </Card.Content>
+        </Card>
+
+        {/* Services Breakdown */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>სერვისები ({editMode ? editedServices.length : totalServices})</Text>
+              <View style={styles.headerActionsRow}>
+                <IconButton
+                  icon="plus"
+                  size={22}
+                  onPress={handleOpenAddServiceModal}
+                  iconColor={COLORS.success}
+                  style={styles.headerActionBtn}
+                />
+                <IconButton
+                  icon={editMode ? "close" : "pencil"}
+                  size={22}
+                  onPress={handleEditToggle}
+                  iconColor={editMode ? COLORS.error : COLORS.primary}
+                  style={styles.headerActionBtn}
+                />
+              </View>
+            </View>
+            {(editMode ? editedServices : caseData.services)?.map((service: any, index: number) => {
+              const normalized = normalizeService(service);
+              return (
+                <View key={index}>
+                  {editMode ? (
+                    <View style={styles.editServiceRow}>
+                      <View style={styles.editServiceInfo}>
+                        <Text style={styles.editServiceName}>{getServiceNameGeorgian(normalized.serviceName)}</Text>
+                        <Text style={styles.editServiceCount}>
+                          {normalized.count > 1 ? `რაოდენობა: ${normalized.count}` : ''}
+                        </Text>
+                      </View>
+                      <TextInput
+                        mode="outlined"
+                        value={editedServices[index].price?.toString() || '0'}
+                        onChangeText={(text) => handleServicePriceChange(index, text)}
+                        keyboardType="numeric"
+                        style={styles.priceInput}
+                        dense
+                        left={<TextInput.Affix text="₾" />}
+                      />
+                      <IconButton
+                        icon="delete"
+                        size={22}
+                        onPress={() => handleDeleteService(index)}
+                        iconColor={COLORS.error}
+                      />
+                    </View>
+                  ) : (
+                    <View style={styles.serviceRow}>
+                      <View style={styles.serviceInfo}>
+                        <Text style={styles.serviceName}>{getServiceNameGeorgian(normalized.serviceName)}</Text>
+                        {normalized.count > 1 && (
+                          <Text style={styles.serviceCount}>x{normalized.count}</Text>
+                        )}
+                      </View>
+                      <Text style={styles.servicePrice}>{formatCurrencyGEL(normalized.price)}</Text>
+                    </View>
+                  )}
+                  {index < (editMode ? editedServices : caseData.services).length - 1 && <Divider style={styles.serviceDivider} />}
+                </View>
+              );
+            })}
+            {editMode && (
+              <View style={styles.editActions}>
+                <Button mode="outlined" onPress={handleEditToggle} style={styles.editButton}>
+                  გაუქმება
+                </Button>
+                <Button mode="contained" onPress={handleSaveChanges} style={styles.editButton}>
+                  შენახვა
+                </Button>
+              </View>
+            )}
+          </Card.Content>
+        </Card>
+
+        {/* Photos with Tagged Work */}
+        {caseData.photos && caseData.photos.length > 0 && (
+          <Card style={styles.card}>
+            <Card.Content>
+              <Text style={styles.sectionTitle}>ფოტოები</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
+                {caseData.photos.map((photo: any, index: number) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.photoCard}
+                    onPress={() => handleImagePress(photo)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.photoImageContainer}>
+                      <Image source={{ uri: photo.url }} style={styles.photoImage} />
+                      
+                      {/* Tag Markers on Thumbnail */}
+                      {caseData.parts && caseData.parts
+                        .filter((part: any) => part.damages?.some((d: any) => d.photoIndex === index))
+                        .map((part: any) => 
+                          part.damages
+                            .filter((d: any) => d.photoIndex === index)
+                            .map((damage: any, idx: number) => {
+                              // Use percentage-based positioning
+                              let displayX, displayY;
+                              if (damage.xPercent !== undefined && damage.yPercent !== undefined) {
+                                displayX = damage.xPercent * 200;
+                                displayY = damage.yPercent * 150;
+                              } else {
+                                // Fallback for old data
+                                const scaleX = 200 / width;
+                                const scaleY = 150 / height;
+                                displayX = damage.x * scaleX;
+                                displayY = damage.y * scaleY;
+                              }
+                              
+                              return (
+                                <View
+                                  key={`${part.partName}-${idx}`}
+                                  style={[
+                                    styles.thumbnailTagMarker,
+                                    {
+                                      left: displayX - 8,
+                                      top: displayY - 8,
+                                    },
+                                  ]}
+                                >
+                                  <View style={styles.thumbnailTagDot} />
+                                </View>
+                              );
+                            })
+                        )}
+                    </View>
+                    
+                    <View style={styles.photoOverlay}>
+                      <Text style={styles.photoLabel}>{photo.label || `Photo ${index + 1}`}</Text>
+                      {caseData.parts && caseData.parts.some((part: any) => 
+                        part.damages?.some((d: any) => d.photoIndex === index)
+                      ) && (
+                        <Chip
+                          mode="flat"
+                          style={styles.taggedChip}
+                          textStyle={styles.taggedChipText}
+                          icon="tag"
+                        >
+                          Tagged
+                        </Chip>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </Card.Content>
+          </Card>
+        )}
+
+        {/* Spacer for bottom actions */}
+        <View style={{ height: 140 }} />
+      </ScrollView>
+
+      {/* Bottom Action Bar - One-handed friendly */}
+      <Surface style={styles.bottomBar} elevation={4}>
+        <TouchableOpacity 
+          style={styles.bottomAction}
+          onPress={handleWhatsAppShare}
+        >
+          <MaterialCommunityIcons name="whatsapp" size={26} color="#25D366" />
+          <Text style={styles.bottomActionText}>WhatsApp</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.bottomAction}
+          onPress={() => Linking.openURL(`tel:${caseData.customerPhone}`)}
+        >
+          <MaterialCommunityIcons name="phone" size={26} color={COLORS.primary} />
+          <Text style={styles.bottomActionText}>დარეკვა</Text>
+        </TouchableOpacity>
+
+        {caseData.status === 'Pending' && (
+          <TouchableOpacity 
+            style={[styles.bottomAction, styles.primaryAction]}
+            onPress={() => handleUpdateStatus('In Progress')}
+          >
+            <MaterialCommunityIcons name="play-circle" size={26} color="#fff" />
+            <Text style={[styles.bottomActionText, { color: '#fff' }]}>დაწყება</Text>
+          </TouchableOpacity>
+        )}
+
+        {caseData.status === 'In Progress' && (
+          <TouchableOpacity 
+            style={[styles.bottomAction, styles.successAction]}
+            onPress={() => handleUpdateStatus('Completed')}
+          >
+            <MaterialCommunityIcons name="check-circle" size={26} color="#fff" />
+            <Text style={[styles.bottomActionText, { color: '#fff' }]}>დასრულება</Text>
+          </TouchableOpacity>
+        )}
+
+        {caseData.status === 'Completed' && (
+          <TouchableOpacity 
+            style={[styles.bottomAction, styles.completedAction]}
+            disabled
+          >
+            <MaterialCommunityIcons name="check-all" size={26} color={COLORS.success} />
+            <Text style={[styles.bottomActionText, { color: COLORS.success }]}>დასრულდა</Text>
+          </TouchableOpacity>
+        )}
+      </Surface>
+
+      {/* Add Service Modal */}
+      <Portal>
+        <Modal
+          visible={showAddServiceModal}
+          onDismiss={() => setShowAddServiceModal(false)}
+          contentContainerStyle={styles.addServiceModal}
+        >
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>სერვისის დამატება</Text>
+            <IconButton
+              icon="close"
+              size={22}
+              onPress={() => setShowAddServiceModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+          
+          {/* Service Selection from Database */}
+          {loadingServices ? (
+            <View style={styles.loadingServicesContainer}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+              <Text style={styles.loadingServicesText}>იტვირთება...</Text>
+            </View>
+          ) : availableServices.length > 0 ? (
+            <View style={styles.servicesListContainer}>
+              <Text style={styles.servicesListTitle}>აირჩიეთ სერვისი:</Text>
+              <ScrollView style={styles.servicesList} nestedScrollEnabled>
+                {availableServices.map((service) => (
+                  <TouchableOpacity
+                    key={service.id}
+                    style={[
+                      styles.serviceItem,
+                      selectedService?.id === service.id && styles.serviceItemSelected
+                    ]}
+                    onPress={() => handleSelectServiceFromDB(service)}
+                  >
+                    <View style={styles.serviceItemContent}>
+                      <Text style={styles.serviceItemName}>{service.nameKa || service.nameEn}</Text>
+                      <Text style={styles.serviceItemPrice}>{formatCurrencyGEL(service.basePrice)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
+          <Divider style={styles.modalDivider} />
+          
+          <TextInput
+            label="სერვისის სახელი *"
+            value={newServiceName}
+            onChangeText={setNewServiceName}
+            mode="outlined"
+            style={styles.modalInput}
+          />
+          
+          <View style={styles.priceCountRow}>
+            <TextInput
+              label="ფასი *"
+              value={newServicePrice}
+              onChangeText={setNewServicePrice}
+              mode="outlined"
+              keyboardType="numeric"
+              style={[styles.modalInput, { flex: 1, marginRight: 8 }]}
+              left={<TextInput.Affix text="₾" />}
+            />
+            <TextInput
+              label="რაოდენობა"
+              value={newServiceCount}
+              onChangeText={setNewServiceCount}
+              mode="outlined"
+              keyboardType="numeric"
+              style={[styles.modalInput, { width: 100 }]}
+            />
+          </View>
+
+          <View style={styles.modalActions}>
+            <Button
+              mode="outlined"
+              onPress={() => {
+                setShowAddServiceModal(false);
+                setNewServiceName('');
+                setNewServicePrice('');
+                setNewServiceCount('1');
+                setSelectedService(null);
+              }}
+              style={styles.modalButton}
+            >
+              გაუქმება
+            </Button>
+            <Button
+              mode="contained"
+              onPress={handleAddService}
+              style={styles.modalButton}
+              disabled={!newServiceName.trim() || !newServicePrice.trim()}
+            >
+              დამატება
+            </Button>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Image Modal with Tagged Work Points */}
+      <Portal>
+        <Modal
+          visible={showImageModal}
+          onDismiss={() => {
+            setShowImageModal(false);
+            scale.value = withSpring(1);
+            savedScale.value = 1;
+          }}
+          contentContainerStyle={styles.imageModal}
+        >
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            {selectedImage && (
+              <View style={styles.imageModalContent}>
+                <View style={styles.imageModalHeader}>
+                  <Text style={styles.imageModalTitle}>{selectedImage.label || 'Photo'}</Text>
+                  <View style={styles.headerActions}>
+                    <IconButton
+                      icon="refresh"
+                      size={20}
+                      onPress={() => {
+                        scale.value = withSpring(1);
+                        savedScale.value = 1;
+                      }}
+                      iconColor={COLORS.primary}
+                    />
+                    <IconButton
+                      icon="close"
+                      size={24}
+                      onPress={() => {
+                        setShowImageModal(false);
+                        scale.value = withSpring(1);
+                        savedScale.value = 1;
+                      }}
+                      iconColor={COLORS.text.primary}
+                    />
+                  </View>
+                </View>
+                
+                {/* Zoom Instruction */}
+                <View style={styles.zoomInstruction}>
+                  <MaterialCommunityIcons name="gesture-pinch" size={16} color={COLORS.text.secondary} />
+                  <Text style={styles.zoomInstructionText}>Pinch to zoom • Tap refresh to reset</Text>
+                </View>
+              
+              {/* Zoomable Image with Tag Markers */}
+              <View style={styles.imageContainer}>
+                <PinchGestureHandler
+                  onGestureEvent={(event) => {
+                    scale.value = savedScale.value * event.nativeEvent.scale;
+                  }}
+                  onHandlerStateChange={(event) => {
+                    if (event.nativeEvent.oldState === State.ACTIVE) {
+                      savedScale.value = scale.value;
+                      if (scale.value < 1) {
+                        scale.value = withSpring(1);
+                        savedScale.value = 1;
+                      } else if (scale.value > 3) {
+                        scale.value = withSpring(3);
+                        savedScale.value = 3;
+                      }
+                    }
+                  }}
+                >
+                  <Animated.View
+                    style={[
+                      styles.imageWrapper,
+                      {
+                        transform: [{ scale: scale }],
+                      },
+                    ]}
+                    onLayout={(event) => {
+                      const { width: w, height: h } = event.nativeEvent.layout;
+                      setContainerDimensions({ width: w, height: h });
+                      
+                      // Calculate actual image display size with resizeMode="contain"
+                      if (selectedImage && actualImageSize.width > 0 && actualImageSize.height > 0) {
+                        const containerAspect = w / h;
+                        const imageAspect = actualImageSize.width / actualImageSize.height;
+                        
+                        let displayWidth, displayHeight;
+                        if (imageAspect > containerAspect) {
+                          // Image is wider - fit to width
+                          displayWidth = w;
+                          displayHeight = w / imageAspect;
+                        } else {
+                          // Image is taller - fit to height
+                          displayHeight = h;
+                          displayWidth = h * imageAspect;
+                        }
+                        
+                        setImageDimensions({ width: displayWidth, height: displayHeight });
+                      }
+                    }}
+                  >
+                    <Image 
+                      source={{ uri: selectedImage.url }} 
+                      style={styles.fullImage} 
+                      resizeMode="contain"
+                      onLoad={(event) => {
+                        const { width: imgW, height: imgH } = event.nativeEvent.source;
+                        setActualImageSize({ width: imgW, height: imgH });
+                        
+                        // Recalculate if container already measured
+                        if (containerDimensions.width > 0 && containerDimensions.height > 0) {
+                          const containerAspect = containerDimensions.width / containerDimensions.height;
+                          const imageAspect = imgW / imgH;
+                          
+                          let displayWidth, displayHeight;
+                          if (imageAspect > containerAspect) {
+                            displayWidth = containerDimensions.width;
+                            displayHeight = containerDimensions.width / imageAspect;
+                          } else {
+                            displayHeight = containerDimensions.height;
+                            displayWidth = containerDimensions.height * imageAspect;
+                          }
+                          
+                          setImageDimensions({ width: displayWidth, height: displayHeight });
+                        }
+                      }}
+                    />
+                    
+                    {/* Tag Markers Overlay */}
+                    {imageDimensions.width > 0 && containerDimensions.width > 0 && caseData.parts && caseData.parts
+                      .filter((part: any) => part.damages?.some((d: any) => 
+                        caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex
+                      ))
+                      .map((part: any) => 
+                        part.damages
+                          .filter((d: any) => caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex)
+                          .map((damage: any, idx: number) => {
+                            // Calculate centering offset for contain mode
+                            const offsetX = (containerDimensions.width - imageDimensions.width) / 2;
+                            const offsetY = (containerDimensions.height - imageDimensions.height) / 2;
+                            
+                            // Use percentage coordinates if available
+                            let displayX, displayY;
+                            if (damage.xPercent !== undefined && damage.yPercent !== undefined) {
+                              displayX = (damage.xPercent * imageDimensions.width) + offsetX;
+                              displayY = (damage.yPercent * imageDimensions.height) + offsetY;
+                            } else {
+                              // Fallback for old data without percentages
+                              const scaleX = imageDimensions.width / width;
+                              const scaleY = imageDimensions.height / height;
+                              displayX = (damage.x * scaleX) + offsetX;
+                              displayY = (damage.y * scaleY) + offsetY;
+                            }
+                            
+                            return (
+                              <View
+                                key={`${part.partName}-${idx}`}
+                                style={[
+                                  styles.tagMarker,
+                                  {
+                                    left: displayX - 16,
+                                    top: displayY - 16,
+                                  },
+                                ]}
+                              >
+                                <View style={styles.tagDot}>
+                                  <MaterialCommunityIcons name="wrench" size={12} color="#fff" />
+                                </View>
+                              </View>
+                            );
+                          })
+                      )}
+                  </Animated.View>
+                </PinchGestureHandler>
+              </View>
+              
+              {/* Show Tagged Parts Info */}
+              {caseData.parts && (
+                <View style={styles.taggedInfoContainer}>
+                  <Text style={styles.taggedInfoTitle}>Tagged Work on this Photo:</Text>
+                  {caseData.parts
+                    .filter((part: any) => part.damages?.some((d: any) => 
+                      caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex
+                    ))
+                    .map((part: any, idx: number) => (
+                      <View key={idx} style={styles.taggedPartCard}>
+                        <MaterialCommunityIcons name="wrench" size={20} color={COLORS.primary} />
+                        <View style={styles.taggedPartInfo}>
+                          <Text style={styles.taggedPartName}>{part.partName}</Text>
+                          {part.damages
+                            .filter((d: any) => caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex)
+                            .map((damage: any, dIdx: number) => (
+                              <View key={dIdx} style={styles.taggedServicesList}>
+                                {damage.services.map((service: any, sIdx: number) => (
+                                  <Text key={sIdx} style={styles.taggedServiceText}>
+                                    • {service.name} - {formatCurrencyGEL(service.price)}
+                                  </Text>
+                                ))}
+                              </View>
+                            ))}
+                        </View>
+                      </View>
+                    ))}
+                  {caseData.parts.filter((part: any) => part.damages?.some((d: any) => 
+                    caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex
+                  )).length === 0 && (
+                    <Text style={styles.noTagsText}>No work tagged on this photo</Text>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
+          </GestureHandlerRootView>
+        </Modal>
+      </Portal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+  },
+  loadingText: {
+    marginTop: 16,
+    color: COLORS.text.secondary,
+    fontSize: 16,
+  },
+  
+  // Header
+  header: {
+    backgroundColor: '#fff',
+    paddingTop: 50,
+    paddingBottom: 12,
+    paddingHorizontal: 8,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.text.primary,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  scrollView: {
+    flex: 1,
+  },
+
+  // Status Card
+  statusCard: {
+    margin: 16,
+    marginBottom: 8,
+    borderRadius: 16,
+    backgroundColor: COLORS.primary + '08',
+    elevation: 0,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusInfo: {
+    flex: 1,
+  },
+  statusChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.primary + '20',
+    marginBottom: 8,
+  },
+  statusChipText: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  customerPhone: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  totalContainer: {
+    alignItems: 'flex-end',
+  },
+  totalLabel: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+  },
+  totalValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+
+  // Cards
+  card: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 16,
+    elevation: 2,
+    backgroundColor: '#fff',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  headerActionsRow: {
+    flexDirection: 'row',
+  },
+  headerActionBtn: {
+    margin: 0,
+  },
+
+  // Customer Info Compact
+  customerInfoCompact: {
+    gap: 8,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    gap: 12,
+  },
+  infoText: {
+    fontSize: 15,
+    color: COLORS.text.primary,
+    flex: 1,
+  },
+  customerInput: {
+    marginBottom: 12,
+    backgroundColor: '#fff',
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  editButton: {
+    flex: 1,
+    borderRadius: 10,
+  },
+
+  // Services
+  serviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  serviceInfo: {
+    flex: 1,
+  },
+  serviceName: {
+    fontSize: 15,
+    color: COLORS.text.primary,
+  },
+  serviceCount: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  servicePrice: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  serviceDivider: {
+    backgroundColor: '#F1F5F9',
+  },
+  editServiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 8,
+  },
+  editServiceInfo: {
+    flex: 1,
+  },
+  editServiceName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.text.primary,
+  },
+  editServiceCount: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+  },
+  priceInput: {
+    width: 100,
+    backgroundColor: '#fff',
+  },
+
+  // Photos
+  photoScroll: {
+    marginTop: 8,
+  },
+  photoCard: {
+    width: 160,
+    height: 120,
+    marginRight: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    elevation: 2,
+  },
+  photoImageContainer: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailTagMarker: {
+    position: 'absolute',
+    zIndex: 5,
+  },
+  thumbnailTagDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: COLORS.primary,
+    borderWidth: 2,
+    borderColor: '#fff',
+    elevation: 2,
+  },
+  photoOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  photoLabel: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  taggedChip: {
+    height: 22,
+    backgroundColor: COLORS.success,
+  },
+  taggedChipText: {
+    fontSize: 9,
+    color: '#fff',
+    marginVertical: 0,
+  },
+
+  // Bottom Action Bar
+  bottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 32,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    gap: 12,
+  },
+  bottomAction: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+  },
+  bottomActionText: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  primaryAction: {
+    backgroundColor: COLORS.primary,
+  },
+  successAction: {
+    backgroundColor: COLORS.success,
+  },
+  completedAction: {
+    backgroundColor: '#F0FDF4',
+  },
+
+  // Modal
+  addServiceModal: {
+    margin: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  modalDivider: {
+    marginVertical: 12,
+  },
+  modalInput: {
+    marginBottom: 12,
+    backgroundColor: '#fff',
+  },
+  priceCountRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 10,
+  },
+  loadingServicesContainer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  loadingServicesText: {
+    marginTop: 8,
+    color: COLORS.text.secondary,
+  },
+  servicesListContainer: {
+    maxHeight: 200,
+    marginBottom: 8,
+  },
+  servicesListTitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.text.secondary,
+    marginBottom: 8,
+  },
+  servicesList: {
+    maxHeight: 180,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 4,
+  },
+  serviceItem: {
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 4,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  serviceItemSelected: {
+    backgroundColor: COLORS.primary + '10',
+    borderColor: COLORS.primary,
+  },
+  serviceItemContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  serviceItemName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.text.primary,
+    flex: 1,
+  },
+  serviceItemPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+
+  // Image Modal
+  imageModal: {
+    margin: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    maxHeight: '90%',
+  },
+  imageModalContent: {
+    flex: 1,
+  },
+  imageModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  imageModalTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  zoomInstruction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    gap: 6,
+    backgroundColor: COLORS.primary + '10',
+  },
+  zoomInstructionText: {
+    fontSize: 11,
+    color: COLORS.text.secondary,
+  },
+  fullImage: {
+    width: width - 32,
+    height: 280,
+  },
+  imageContainer: {
+    width: width - 32,
+    height: 280,
+    overflow: 'hidden',
+    backgroundColor: '#F8FAFC',
+  },
+  imageWrapper: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
+  tagMarker: {
+    position: 'absolute',
+    zIndex: 10,
+  },
+  tagDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    elevation: 4,
+  },
+  taggedInfoContainer: {
+    padding: 16,
+    maxHeight: 200,
+  },
+  taggedInfoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 12,
+  },
+  taggedPartCard: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  taggedPartInfo: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  taggedPartName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 4,
+  },
+  taggedServicesList: {
+    marginTop: 4,
+  },
+  taggedServiceText: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginBottom: 2,
+  },
+  noTagsText: {
+    fontSize: 13,
+    color: COLORS.text.tertiary,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+});
