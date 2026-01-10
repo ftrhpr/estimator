@@ -194,24 +194,33 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
     // Transform services to use Georgian names
     const georgianServices = transformServicesToGeorgian(invoiceData.services || []);
     
-const payload = {
-  firebaseId: firebaseId,
-  customerName: invoiceData.customerName || 'N/A',
-  customerPhone: invoiceData.customerPhone || '',
-  plate: invoiceData.plate || 'N/A',
-  vehicleMake: invoiceData.carMake || '',
-  vehicleModel: invoiceData.carModel || '',
-  totalPrice: invoiceData.totalPrice || 0,
-  services: georgianServices,
-  parts: invoiceData.parts || [],
-  photos: invoiceData.photos || [],              // ✅ ADD THIS LINE - actual photo URLs
-  photosCount: invoiceData.photos?.length || 0,
-  partsCount: invoiceData.parts?.length || 0,
-  status: invoiceData.status || 'New',
-  serviceDate: invoiceData.createdAt || new Date().toISOString(),
-  createdAt: invoiceData.createdAt || new Date().toISOString(),
-};    
+    // Log photos data for debugging
+    console.log('[cPanel API] Photos data received:', {
+      photosCount: invoiceData.photos?.length || 0,
+      photosType: typeof invoiceData.photos,
+      firstPhotoUrl: invoiceData.photos?.[0]?.url || invoiceData.photos?.[0] || 'none',
+    });
+    
+    const payload = {
+      firebaseId: firebaseId,
+      customerName: invoiceData.customerName || 'N/A',
+      customerPhone: invoiceData.customerPhone || '',
+      plate: invoiceData.plate || 'N/A',
+      vehicleMake: invoiceData.carMake || '',
+      vehicleModel: invoiceData.carModel || '',
+      totalPrice: invoiceData.totalPrice || 0,
+      services: georgianServices,
+      parts: invoiceData.parts || [],
+      photos: invoiceData.photos || [],              // Actual photo URLs from Firebase Storage
+      photosCount: invoiceData.photos?.length || 0,
+      partsCount: invoiceData.parts?.length || 0,
+      status: invoiceData.status || 'New',
+      serviceDate: invoiceData.createdAt || new Date().toISOString(),
+      createdAt: invoiceData.createdAt || new Date().toISOString(),
+    };
+    
     console.log('[cPanel API] Syncing invoice:', firebaseId);
+    console.log('[cPanel API] Payload photos field:', JSON.stringify(payload.photos));
     
     const response = await makeRequest('create-invoice.php', payload);
     
