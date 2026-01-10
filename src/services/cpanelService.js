@@ -198,16 +198,15 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       firebaseId: firebaseId,
       customerName: invoiceData.customerName || 'N/A',
       customerPhone: invoiceData.customerPhone || '',
-      carModel: invoiceData.plate || invoiceData.carModel || 'Unknown', // Maps to 'plate' column
-      plate: invoiceData.plate || invoiceData.carModel || 'N/A',
-      vehicleMake: invoiceData.carMake || '',       // Vehicle make (e.g., Toyota, BMW)
-      vehicleModel: invoiceData.carModel || '',     // Vehicle model (e.g., Camry, X5)
-      totalPrice: invoiceData.totalPrice || 0,      // Maps to 'amount' column
-      services: georgianServices,                    // Stored in systemLogs with Georgian names
-      parts: invoiceData.parts || [],               // Stored in parts JSON column
-      photosCount: invoiceData.photos?.length || 0, // Stored in systemLogs
-      partsCount: invoiceData.parts?.length || 0,   // Stored in systemLogs
-      status: invoiceData.status || 'New',          // Maps to 'status' column
+      plate: invoiceData.plate || 'N/A',             // License plate number only
+      vehicleMake: invoiceData.carMake || '',        // Vehicle make (e.g., Toyota, BMW)
+      vehicleModel: invoiceData.carModel || '',      // Vehicle model (e.g., Camry, X5)
+      totalPrice: invoiceData.totalPrice || 0,       // Maps to 'amount' column
+      services: georgianServices,                     // Stored in systemLogs with Georgian names
+      parts: invoiceData.parts || [],                // Stored in parts JSON column
+      photosCount: invoiceData.photos?.length || 0,  // Stored in systemLogs
+      partsCount: invoiceData.parts?.length || 0,    // Stored in systemLogs
+      status: invoiceData.status || 'New',           // Maps to 'status' column
       serviceDate: invoiceData.createdAt || new Date().toISOString(),
       createdAt: invoiceData.createdAt || new Date().toISOString(),
     };
