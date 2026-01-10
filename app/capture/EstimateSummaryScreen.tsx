@@ -25,6 +25,7 @@ import {
     TextInput,
 } from 'react-native-paper';
 
+import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
 import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 import { createInspection, getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
@@ -633,22 +634,28 @@ export default function EstimateSummaryScreen() {
 
           {/* Car Make & Model */}
           <Text style={styles.sectionLabel}>მარკა და მოდელი</Text>
-          <View style={styles.carMakeModelRow}>
-            <TextInput
-              label="მარკა"
-              value={carMake}
-              onChangeText={setCarMake}
-              placeholder="Toyota"
-              style={[styles.phoneInput, styles.halfInput]}
-            />
-            <TextInput
-              label="მოდელი"
-              value={carModel}
-              onChangeText={setCarModel}
-              placeholder="Camry"
-              style={[styles.phoneInput, styles.halfInput]}
-            />
-          </View>
+          <CarSelector
+            value={carMakeId && carModelId ? {
+              makeId: carMakeId,
+              makeName: carMake,
+              modelId: carModelId,
+              modelName: carModel,
+            } : null}
+            onChange={(car: SelectedCar | null) => {
+              if (car) {
+                setCarMake(car.makeName);
+                setCarModel(car.modelName);
+                setCarMakeId(car.makeId);
+                setCarModelId(car.modelId);
+              } else {
+                setCarMake('');
+                setCarModel('');
+                setCarMakeId('');
+                setCarModelId('');
+              }
+            }}
+            placeholder="აირჩიეთ მარკა და მოდელი"
+          />
 
           <View style={styles.modalActions}>
             <Button

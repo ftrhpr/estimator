@@ -30,6 +30,7 @@ import Reanimated, {
     withSpring
 } from 'react-native-reanimated';
 
+import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
 import { ServiceService } from '../../src/services/serviceService';
@@ -720,26 +721,28 @@ export default function CaseDetailScreen() {
                   
                   {/* Car Make & Model */}
                   <Text style={styles.sectionSubtitle}>მანქანის მარკა და მოდელი</Text>
-                  <View style={styles.carMakeModelRow}>
-                    <TextInput
-                      label="მარკა"
-                      value={editedCarMake}
-                      onChangeText={setEditedCarMake}
-                      mode="outlined"
-                      style={[styles.modernInput, styles.halfInput]}
-                      outlineStyle={styles.inputOutline}
-                      placeholder="Toyota"
-                    />
-                    <TextInput
-                      label="მოდელი"
-                      value={editedCarModel}
-                      onChangeText={setEditedCarModel}
-                      mode="outlined"
-                      style={[styles.modernInput, styles.halfInput]}
-                      outlineStyle={styles.inputOutline}
-                      placeholder="Camry"
-                    />
-                  </View>
+                  <CarSelector
+                    value={editedCarMakeId && editedCarModelId ? {
+                      makeId: editedCarMakeId,
+                      makeName: editedCarMake,
+                      modelId: editedCarModelId,
+                      modelName: editedCarModel,
+                    } : null}
+                    onChange={(car: SelectedCar | null) => {
+                      if (car) {
+                        setEditedCarMake(car.makeName);
+                        setEditedCarModel(car.modelName);
+                        setEditedCarMakeId(car.makeId);
+                        setEditedCarModelId(car.modelId);
+                      } else {
+                        setEditedCarMake('');
+                        setEditedCarModel('');
+                        setEditedCarMakeId('');
+                        setEditedCarModelId('');
+                      }
+                    }}
+                    placeholder="აირჩიეთ მარკა და მოდელი"
+                  />
                   
                   <View style={styles.modernEditActions}>
                     <Button
