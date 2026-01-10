@@ -224,6 +224,7 @@ const parseCSV = (csvText: string): string[][] => {
 
 /**
  * Fetch all car makes from Car2DB API
+ * Falls back to hardcoded data if API fails
  * @returns Array of car makes
  */
 export const fetchCarMakes = async (): Promise<CarMake[]> => {
@@ -235,7 +236,8 @@ export const fetchCarMakes = async (): Promise<CarMake[]> => {
     const response = await fetch(url);
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      console.warn(`[Car API] API returned ${response.status}, using fallback data`);
+      return FALLBACK_MAKES;
     }
     
     const csvText = await response.text();
@@ -255,19 +257,26 @@ export const fetchCarMakes = async (): Promise<CarMake[]> => {
       }
     }
     
+    // If no makes found, use fallback
+    if (makes.length === 0) {
+      console.warn('[Car API] No makes found in API response, using fallback data');
+      return FALLBACK_MAKES;
+    }
+    
     // Sort alphabetically by name
     makes.sort((a, b) => a.name.localeCompare(b.name));
     
     console.log(`[Car API] Fetched ${makes.length} car makes`);
     return makes;
   } catch (error) {
-    console.error('[Car API] Error fetching car makes:', error);
-    throw error;
+    console.warn('[Car API] Error fetching car makes, using fallback data:', error);
+    return FALLBACK_MAKES;
   }
 };
 
 /**
  * Fetch all car models from Car2DB API
+ * Falls back to hardcoded data if API fails
  * @returns Array of car models with their make IDs
  */
 export const fetchCarModels = async (): Promise<CarModel[]> => {
@@ -279,7 +288,13 @@ export const fetchCarModels = async (): Promise<CarModel[]> => {
     const response = await fetch(url);
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      console.warn(`[Car API] API returned ${response.status}, using fallback data`);
+      // Flatten all fallback models into a single array
+      const allFallbackModels: CarModel[] = [];
+      Object.values(FALLBACK_MODELS).forEach(models => {
+        allFallbackModels.push(...models);
+      });
+      return allFallbackModels;
     }
     
     const csvText = await response.text();
@@ -300,14 +315,29 @@ export const fetchCarModels = async (): Promise<CarModel[]> => {
       }
     }
     
+    // If no models found, use fallback
+    if (models.length === 0) {
+      console.warn('[Car API] No models found in API response, using fallback data');
+      const allFallbackModels: CarModel[] = [];
+      Object.values(FALLBACK_MODELS).forEach(models => {
+        allFallbackModels.push(...models);
+      });
+      return allFallbackModels;
+    }
+    
     // Sort alphabetically by name
     models.sort((a, b) => a.name.localeCompare(b.name));
     
     console.log(`[Car API] Fetched ${models.length} car models`);
     return models;
   } catch (error) {
-    console.error('[Car API] Error fetching car models:', error);
-    throw error;
+    console.warn('[Car API] Error fetching car models, using fallback data:', error);
+    // Flatten all fallback models into a single array
+    const allFallbackModels: CarModel[] = [];
+    Object.values(FALLBACK_MODELS).forEach(models => {
+      allFallbackModels.push(...models);
+    });
+    return allFallbackModels;
   }
 };
 
