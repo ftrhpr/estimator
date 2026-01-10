@@ -278,7 +278,22 @@ const syncToCPanel = async (inspectionId, updates, cpanelInvoiceId, docRef) => {
     // If we have a cPanel ID, update the existing record
     if (cpanelId) {
       console.log('[Firebase] Updating existing cPanel record:', cpanelId);
-      const result = await updateInvoiceToCPanel(cpanelId, updates);
+      
+      // Map Firebase field names to cPanel field names
+      const cpanelUpdates = {
+        ...updates,
+        // Map carMake/carModel to vehicleMake/vehicleModel for cPanel
+        vehicleMake: updates.carMake || updates.vehicleMake || '',
+        vehicleModel: updates.carModel || updates.vehicleModel || '',
+      };
+      
+      console.log('[Firebase] cPanel updates with vehicle info:', {
+        vehicleMake: cpanelUpdates.vehicleMake,
+        vehicleModel: cpanelUpdates.vehicleModel,
+        plate: cpanelUpdates.plate,
+      });
+      
+      const result = await updateInvoiceToCPanel(cpanelId, cpanelUpdates);
       return { ...result, cpanelId };
     }
     
