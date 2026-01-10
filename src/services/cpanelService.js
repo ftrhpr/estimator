@@ -194,23 +194,23 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
     // Transform services to use Georgian names
     const georgianServices = transformServicesToGeorgian(invoiceData.services || []);
     
-    const payload = {
-      firebaseId: firebaseId,
-      customerName: invoiceData.customerName || 'N/A',
-      customerPhone: invoiceData.customerPhone || '',
-      plate: invoiceData.plate || 'N/A',             // License plate number only
-      vehicleMake: invoiceData.carMake || '',        // Vehicle make (e.g., Toyota, BMW)
-      vehicleModel: invoiceData.carModel || '',      // Vehicle model (e.g., Camry, X5)
-      totalPrice: invoiceData.totalPrice || 0,       // Maps to 'amount' column
-      services: georgianServices,                     // Stored in systemLogs with Georgian names
-      parts: invoiceData.parts || [],                // Stored in parts JSON column
-      photosCount: invoiceData.photos?.length || 0,  // Stored in systemLogs
-      partsCount: invoiceData.parts?.length || 0,    // Stored in systemLogs
-      status: invoiceData.status || 'New',           // Maps to 'status' column
-      serviceDate: invoiceData.createdAt || new Date().toISOString(),
-      createdAt: invoiceData.createdAt || new Date().toISOString(),
-    };
-    
+const payload = {
+  firebaseId: firebaseId,
+  customerName: invoiceData.customerName || 'N/A',
+  customerPhone: invoiceData.customerPhone || '',
+  plate: invoiceData.plate || 'N/A',
+  vehicleMake: invoiceData.carMake || '',
+  vehicleModel: invoiceData.carModel || '',
+  totalPrice: invoiceData.totalPrice || 0,
+  services: georgianServices,
+  parts: invoiceData.parts || [],
+  photos: invoiceData.photos || [],              // ✅ ADD THIS LINE - actual photo URLs
+  photosCount: invoiceData.photos?.length || 0,
+  partsCount: invoiceData.parts?.length || 0,
+  status: invoiceData.status || 'New',
+  serviceDate: invoiceData.createdAt || new Date().toISOString(),
+  createdAt: invoiceData.createdAt || new Date().toISOString(),
+};    
     console.log('[cPanel API] Syncing invoice:', firebaseId);
     
     const response = await makeRequest('create-invoice.php', payload);
