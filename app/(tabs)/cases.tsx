@@ -28,7 +28,7 @@ import {
 
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
-import { deleteInspection, getAllInspections } from '../../src/services/firebase';
+import { getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width } = Dimensions.get('window');
@@ -124,15 +124,27 @@ export default function CasesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteInspection(caseId);
+              // Find the case to get cPanel invoice ID
+              const caseToDelete = cases.find(c => c.id === caseId);
+              
+              // Only delete from cPanel if it exists there
+              if (caseToDelete?.cpanelInvoiceId) {
+                const { deleteInvoiceFromCPanel } = await import('../../src/services/cpanelService');
+                await deleteInvoiceFromCPanel(caseToDelete.cpanelInvoiceId);
+              }
+              
+              // Remove from local state for immediate UI feedback
               setCases(prevCases => prevCases.filter(c => c.id !== caseId));
+              
+              Alert.alert('Success', 'Invoice deleted from cPanel');
             } catch (error) {
               console.error('Error deleting case:', error);
-              Alert.alert('Error', 'Failed to delete case');
+              Alert.alert('Error', 'Failed to delete invoice from cPanel');
             }
           }
         }
       ]
+```
     );
   };
 

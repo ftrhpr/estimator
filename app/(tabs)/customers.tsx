@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import { Text, Appbar, Card, Searchbar, FAB, Portal, Modal, TextInput, Button, IconButton, ActivityIndicator } from 'react-native-paper';
-import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, SPACING, TYPOGRAPHY, BORDER_RADIUS } from '../../src/config/constants';
-import { getAllInspections, createInspection, updateInspection, deleteInspection } from '../../src/services/firebase';
+import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Appbar, Button, Card, FAB, IconButton, Modal, Portal, Searchbar, Text, TextInput } from 'react-native-paper';
+import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
+import { createInspection, getAllInspections, updateInspection } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 interface Customer {
@@ -199,21 +199,30 @@ export default function CustomersScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Delete all inspections for this customer
+              // Sync deletion to cPanel for all customer invoices (if configured)
               const inspections = await getAllInspections();
               const customerInspections = inspections.filter(
                 (inv: any) => inv.customerPhone === customer.phone
               );
               
+              // Delete from cPanel only (not from Firebase)
+              const { deleteInvoiceFromCPanel } = await import('../../src/services/cpanelService');
+              
               for (const inspection of customerInspections) {
-                await deleteInspection(inspection.id);
+                if (inspection.cpanelInvoiceId) {
+                  try {
+                    await deleteInvoiceFromCPanel(inspection.cpanelInvoiceId);
+                  } catch (error) {
+                    console.error(`Failed to delete cPanel invoice ${inspection.cpanelInvoiceId}:`, error);
+                  }
+                }
               }
               
-              Alert.alert('Success', 'Customer and all invoices deleted');
+              Alert.alert('Success', 'Customer invoices deleted from cPanel (records kept in app)');
               loadCustomers();
             } catch (error) {
-              console.error('Error deleting customer:', error);
-              Alert.alert('Error', 'Failed to delete customer');
+              console.error('Error deleting customer invoices:', error);
+              Alert.alert('Error', 'Failed to delete customer invoices from cPanel');
             }
           },
         },
