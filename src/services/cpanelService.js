@@ -426,9 +426,12 @@ export const fetchCPanelInvoiceId = async (firebaseId) => {
     
     const response = await makeRequest('get-invoice-id.php', { firebaseId }, 'GET');
     
-    if (response.success && response.cpanelInvoiceId) {
-      console.log('[cPanel API] Found cPanel invoice ID:', response.cpanelInvoiceId);
-      return response.cpanelInvoiceId;
+    // Response structure: { success: true, data: { cpanelInvoiceId: '123', firebaseId: 'abc' } }
+    const cpanelId = response.data?.cpanelInvoiceId || response.cpanelInvoiceId;
+    
+    if (response.success && cpanelId) {
+      console.log('[cPanel API] Found cPanel invoice ID:', cpanelId);
+      return cpanelId;
     }
     
     console.log('[cPanel API] cPanel invoice ID not found for Firebase ID:', firebaseId);

@@ -3,31 +3,32 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    View
+  Alert,
+  Dimensions,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  View
 } from 'react-native';
 import {
-    ActivityIndicator,
-    Appbar,
-    Button,
-    Card,
-    Chip,
-    Divider,
-    IconButton,
-    List,
-    Modal,
-    Portal,
-    Text,
-    TextInput,
+  ActivityIndicator,
+  Appbar,
+  Button,
+  Card,
+  Chip,
+  Divider,
+  IconButton,
+  List,
+  Modal,
+  Portal,
+  Text,
+  TextInput,
 } from 'react-native-paper';
 
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
 import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 import { createInspection, getAllInspections } from '../../src/services/firebase';
+import { StorageService } from '../../src/services/storageService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width } = Dimensions.get('window');
@@ -303,6 +304,37 @@ export default function EstimateSummaryScreen() {
 
     try {
       setIsSaving(true);
+      
+      // Upload photos to Firebase Storage first
+      console.log('Uploading photos to Firebase Storage...');
+      let uploadedPhotos: any[] = [];
+      if (photosData && photosData.length > 0) {
+        for (let i = 0; i < photosData.length; i++) {
+          const photo = photosData[i];
+          // Check if this is a local file URI that needs uploading
+          if (photo.url && (photo.url.startsWith('file://') || photo.url.startsWith('content://'))) {
+            try {
+              console.log(`Uploading photo ${i + 1}/${photosData.length}...`);
+              const downloadUrl = await StorageService.uploadEstimatePhoto(photo.url);
+              uploadedPhotos.push({
+                ...photo,
+                url: downloadUrl,
+                localUri: photo.url, // Keep original local URI as backup
+              });
+              console.log(`Photo ${i + 1} uploaded successfully`);
+            } catch (uploadError) {
+              console.error(`Failed to upload photo ${i + 1}:`, uploadError);
+              // Keep local URI if upload fails
+              uploadedPhotos.push(photo);
+            }
+          } else {
+            // Already a remote URL, keep as-is
+            uploadedPhotos.push(photo);
+          }
+        }
+        console.log('All photos processed. Uploaded:', uploadedPhotos.length);
+      }
+      
       // Prepare combined services array - including both manual services and tagged works
       // Include both English (serviceName) and Georgian (serviceNameKa) names
       const allServices = [...estimateItems.map(item => ({
@@ -346,7 +378,7 @@ export default function EstimateSummaryScreen() {
       // Log the final services array
       console.log('Final services array being sent:', allServices);
 
-      // Prepare invoice data
+      // Prepare invoice data with uploaded photo URLs
       const invoiceData = {
         customerName: customerInfo.name || customerName || 'N/A',
         customerPhone: customerInfo.phone,
@@ -357,7 +389,7 @@ export default function EstimateSummaryScreen() {
         plate: plate || 'N/A',
         totalPrice: getTotalPrice(),
         services: allServices,
-        photos: photosData,
+        photos: uploadedPhotos.length > 0 ? uploadedPhotos : photosData,
         parts: partsData,
         status: 'Pending',
         isRepeatCustomer: customerInfo.isRepeat,
