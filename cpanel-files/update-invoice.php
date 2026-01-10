@@ -54,17 +54,35 @@ try {
         'user_response' => 'user_response',
         'services' => 'repair_labor',
         'parts' => 'parts',
+        'images' => 'case_images',
+        'photos' => 'case_images',
+        'imageUrls' => 'case_images',
+        'photoUrls' => 'case_images',
+        'caseImages' => 'case_images',
+        'vehicleImages' => 'case_images',
+        'damageImages' => 'case_images',
+        'attachments' => 'case_images',
     ];
     
-    // Debug: Log received vehicle data
-    error_log("Received data - vehicleMake: " . ($data['vehicleMake'] ?? 'NULL') . ", vehicleModel: " . ($data['vehicleModel'] ?? 'NULL') . ", carMake: " . ($data['carMake'] ?? 'NULL') . ", carModel: " . ($data['carModel'] ?? 'NULL'));
+    // Debug: Log all received data keys and image fields
+    error_log("=== UPDATE INVOICE - DATA RECEIVED ===");
+    error_log("All keys: " . implode(', ', array_keys($data)));
+    error_log("Received data - vehicleMake: " . ($data['vehicleMake'] ?? 'NULL') . ", vehicleModel: " . ($data['vehicleModel'] ?? 'NULL'));
+    
+    // Check for image fields
+    $imageFieldsToCheck = ['images', 'photos', 'imageUrls', 'photoUrls', 'caseImages', 'vehicleImages', 'damageImages', 'attachments'];
+    foreach ($imageFieldsToCheck as $imgField) {
+        if (isset($data[$imgField])) {
+            error_log("Found images in '$imgField': " . (is_array($data[$imgField]) ? count($data[$imgField]) . " items" : gettype($data[$imgField])));
+        }
+    }
     
     foreach ($fieldMapping as $appField => $dbField) {
         if (isset($data[$appField]) && $data[$appField] !== null && $data[$appField] !== '') {
             $value = $data[$appField];
             
             // Handle JSON fields
-            if (in_array($dbField, ['repair_labor', 'parts'])) {
+            if (in_array($dbField, ['repair_labor', 'parts', 'case_images'])) {
                 if (is_array($value)) {
                     // Transform services to match portal format (same as create-invoice.php)
                     if ($dbField === 'repair_labor') {
@@ -97,6 +115,23 @@ try {
                         }, $value);
                         $value = json_encode($transformedServices, JSON_UNESCAPED_UNICODE);
                         error_log("Services transformed for update: " . $value);
+                    } elseif ($dbField === 'case_images') {
+                        // Normalize images - extract URLs from various formats
+                        $imageUrls = [];
+                        foreach ($value as $img) {
+                            if (is_string($img)) {
+                                // Already a URL string
+                                $imageUrls[] = $img;
+                            } elseif (is_array($img)) {
+                                // Object with URL property - try common field names
+                                $url = $img['downloadURL'] ?? $img['downloadUrl'] ?? $img['url'] ?? $img['uri'] ?? $img['src'] ?? null;
+                                if ($url) {
+                                    $imageUrls[] = $url;
+                                }
+                            }
+                        }
+                        $value = json_encode($imageUrls, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                        error_log("Images transformed for update: " . count($imageUrls) . " URLs extracted");
                     } else {
                         $value = json_encode($value, JSON_UNESCAPED_UNICODE);
                     }

@@ -19,6 +19,19 @@ try {
         sendResponse(false, null, 'Invalid JSON data', 400);
     }
     
+    // Debug: Log all received data to check image field names
+    error_log("=== CREATE INVOICE - FULL DATA RECEIVED ===");
+    error_log("All keys: " . implode(', ', array_keys($data)));
+    error_log("Full data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    
+    // Check for various possible image field names from mobile app
+    $possibleImageFields = ['images', 'photos', 'imageUrls', 'photoUrls', 'caseImages', 'vehicleImages', 'damageImages', 'attachments'];
+    foreach ($possibleImageFields as $field) {
+        if (isset($data[$field])) {
+            error_log("Found images in field '$field': " . json_encode($data[$field]));
+        }
+    }
+    
     // Validate required fields
     $requiredFields = ['customerPhone', 'totalPrice']; // Minimum required
     foreach ($requiredFields as $field) {
@@ -42,6 +55,7 @@ try {
         status,
         parts,
         repair_labor,
+        case_images,
         serviceDate,
         service_date,
         repair_status,
@@ -58,6 +72,7 @@ try {
         :status,
         :parts,
         :repair_labor,
+        :case_images,
         :serviceDate,
         :service_date,
         :repair_status,
@@ -124,6 +139,35 @@ try {
         $serviceDate = date('Y-m-d H:i:s', strtotime($data['createdAt']));
     }
     
+    // Handle images array (Firebase Storage URLs)
+    // Check multiple possible field names from mobile app
+    $imagesJson = null;
+    $imageFields = ['images', 'photos', 'imageUrls', 'photoUrls', 'caseImages', 'vehicleImages', 'damageImages', 'attachments'];
+    foreach ($imageFields as $field) {
+        if (isset($data[$field]) && is_array($data[$field]) && !empty($data[$field])) {
+            // Normalize images - extract URLs from various formats
+            $imageUrls = [];
+            foreach ($data[$field] as $img) {
+                if (is_string($img)) {
+                    // Already a URL string
+                    $imageUrls[] = $img;
+                } elseif (is_array($img)) {
+                    // Object with URL property - try common field names
+                    $url = $img['downloadURL'] ?? $img['downloadUrl'] ?? $img['url'] ?? $img['uri'] ?? $img['src'] ?? null;
+                    if ($url) {
+                        $imageUrls[] = $url;
+                    }
+                }
+            }
+            
+            if (!empty($imageUrls)) {
+                $imagesJson = json_encode($imageUrls, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                error_log("Images found in field '$field': " . count($imageUrls) . " images extracted");
+            }
+            break;
+        }
+    }
+    
     // Bind parameters
     $stmt->execute([
         ':plate' => $data['plate'] ?? 'N/A',          // License plate number only
@@ -135,6 +179,7 @@ try {
         ':status' => 'Processing',                    // Default status - Processing
         ':parts' => $partsJson,                       // parts JSON (damage tags)
         ':repair_labor' => $servicesJson,             // repair_labor JSON (services with hours and hourly_rate)
+        ':case_images' => $imagesJson,                // case_images JSON (Firebase Storage URLs)
         ':serviceDate' => $serviceDate,               // Service date (datetime)
         ':service_date' => $serviceDate,              // Service date (datetime) - duplicate column
         ':repair_status' => null,                     // Leave repair_status NULL
