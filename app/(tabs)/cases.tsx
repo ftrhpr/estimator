@@ -134,20 +134,50 @@ export default function CasesScreen() {
             try {
               // Find the case to get cPanel invoice ID
               const caseToDelete = cases.find(c => c.id === caseId);
+              let cpanelDeleted = false;
+              let cpanelId: string | undefined = caseToDelete?.cpanelInvoiceId || undefined;
               
-              // Only delete from cPanel if it exists there
-              if (caseToDelete?.cpanelInvoiceId) {
-                const { deleteInvoiceFromCPanel } = await import('../../src/services/cpanelService');
-                await deleteInvoiceFromCPanel(caseToDelete.cpanelInvoiceId);
+              // Try to get cPanel ID if not stored locally
+              if (!cpanelId) {
+                try {
+                  const { fetchCPanelInvoiceId } = await import('../../src/services/cpanelService');
+                  const fetchedId = await fetchCPanelInvoiceId(caseId);
+                  cpanelId = fetchedId || undefined;
+                } catch (e) {
+                  console.log('[Delete] Could not fetch cPanel ID:', e);
+                }
               }
+              
+              // Delete from cPanel if ID exists
+              if (cpanelId) {
+                try {
+                  const { deleteInvoiceFromCPanel } = await import('../../src/services/cpanelService');
+                  const result = await deleteInvoiceFromCPanel(cpanelId) as { success: boolean; error?: string };
+                  cpanelDeleted = result.success === true;
+                  console.log('[Delete] cPanel delete result:', result);
+                } catch (e) {
+                  console.error('[Delete] cPanel delete error:', e);
+                }
+              }
+              
+              // Delete from Firebase
+              const { deleteInspection } = await import('../../src/services/firebase');
+              await deleteInspection(caseId);
+              console.log('[Delete] Firebase delete successful:', caseId);
               
               // Remove from local state for immediate UI feedback
               setCases(prevCases => prevCases.filter(c => c.id !== caseId));
               
-              Alert.alert('Success', 'Invoice deleted from cPanel');
+              if (cpanelId && cpanelDeleted) {
+                Alert.alert('✅ წაშლილია', 'ინვოისი წაიშალა Firebase-დან და cPanel-დან');
+              } else if (cpanelId && !cpanelDeleted) {
+                Alert.alert('⚠️ ნაწილობრივ წაშლილია', 'ინვოისი წაიშალა Firebase-დან, მაგრამ cPanel-ში ვერ წაიშალა');
+              } else {
+                Alert.alert('✅ წაშლილია', 'ინვოისი წაიშალა Firebase-დან');
+              }
             } catch (error) {
               console.error('Error deleting case:', error);
-              Alert.alert('Error', 'Failed to delete invoice from cPanel');
+              Alert.alert('❌ შეცდომა', 'ინვოისის წაშლა ვერ მოხერხდა');
             }
           }
         }
