@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Alert, FlatList } from 'react-native';
-import { Appbar, Card, Text, Button, DataTable, Divider, FAB, ActivityIndicator } from 'react-native-paper';
-import { EstimateReviewData, InvoiceLineItem, VisualEstimate, Service } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { Alert, FlatList, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Appbar, Button, Card, DataTable, Divider, FAB, Text } from 'react-native-paper';
+import { COLORS } from '../../config/constants';
+import { GEORGIAN_LABELS } from '../../config/georgian';
 import { PDFService } from '../../services/pdfService';
 import { ServiceService } from '../../services/serviceService';
-import { GEORGIAN_LABELS } from '../../config/georgian';
-import { COLORS, APP_CONFIG } from '../../config/constants';
+import { EstimateReviewData, InvoiceLineItem, Service, VisualEstimate } from '../../types';
 
 interface ReviewEstimateScreenProps {
   estimateData: EstimateReviewData;
@@ -91,10 +91,7 @@ export const ReviewEstimateScreen: React.FC<ReviewEstimateScreenProps> = ({
       <DataTable.Cell style={styles.itemCell}>
         <View>
           <Text variant="bodyMedium" style={styles.itemName}>
-            {item.nameKa}
-          </Text>
-          <Text variant="bodySmall" style={styles.itemSubtext}>
-            {item.nameEn}
+            {item.nameKa || item.nameEn}
           </Text>
           {item.damageZone && (
             <Text variant="bodySmall" style={styles.damageZone}>

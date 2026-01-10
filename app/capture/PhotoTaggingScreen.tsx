@@ -2,27 +2,27 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    StyleSheet,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  StyleSheet,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import {
-    Appbar,
-    Button,
-    List,
-    Modal,
-    Portal,
-    Text,
-    TextInput
+  Appbar,
+  Button,
+  List,
+  Modal,
+  Portal,
+  Text,
+  TextInput
 } from 'react-native-paper';
 import Animated, {
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring
 } from 'react-native-reanimated';
 
 import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
@@ -41,6 +41,7 @@ interface PhotoTag {
   serviceKey: string;
   serviceName: string;
   serviceNameKa: string;
+  serviceNameEn?: string;
   description?: string;
   price: number;
   originalPrice: number;
@@ -60,6 +61,7 @@ interface ServiceOption {
   basePrice: number;
   category: string;
   icon: string;
+  description?: string;
 }
 
 const SERVICE_ICONS: Record<string, string> = {
@@ -223,8 +225,9 @@ export default function PhotoTaggingScreen() {
       xPercent: selectedPosition.xPercent || (selectedPosition.x / imageLayout.width),
       yPercent: selectedPosition.yPercent || (selectedPosition.y / imageLayout.height),
       serviceKey: service.key,
-      serviceName: service.nameEn,
+      serviceName: service.nameKa, // Use Georgian as primary name
       serviceNameKa: service.nameKa,
+      serviceNameEn: service.nameEn, // Store English as backup
       description: service.description || '',
       price: service.basePrice,
       originalPrice: service.basePrice,
@@ -446,7 +449,7 @@ export default function PhotoTaggingScreen() {
         <Text style={styles.tagNumber}>{photos[currentPhotoIndex].tags.indexOf(tag) + 1}</Text>
       </View>
       <View style={styles.tagLabel}>
-        <Text style={styles.tagText}>{tag.serviceName}</Text>
+        <Text style={styles.tagText}>{tag.serviceNameKa || tag.serviceName}</Text>
         <Text style={styles.tagPrice}>{formatCurrencyGEL(tag.price)}</Text>
       </View>
     </TouchableOpacity>
@@ -487,13 +490,13 @@ export default function PhotoTaggingScreen() {
       <Appbar.Header style={styles.header}>
         <Appbar.BackAction onPress={() => router.back()} />
         <Appbar.Content 
-          title="Tag Damage"
-          subtitle={`Photo ${currentPhotoIndex + 1} of ${photos.length}`}
+          title="დაზიანების მონიშვნა"
+          subtitle={`ფოტო ${currentPhotoIndex + 1} / ${photos.length}`}
           titleStyle={styles.headerTitle}
         />
         <Appbar.Action 
           icon="information-outline"
-          onPress={() => Alert.alert('How to Tag', 'Tap directly on damage areas in the photo to assign services and pricing.')}
+          onPress={() => Alert.alert('როგორ მონიშნოთ', 'დააჭირეთ დაზიანებულ ადგილებს ფოტოზე სერვისისა და ფასის მისანიჭებლად.')}
         />
       </Appbar.Header>
 
@@ -534,7 +537,7 @@ export default function PhotoTaggingScreen() {
                   color={COLORS.text.onPrimary}
                 />
                 <Text style={styles.instructionText}>
-                  Tap on damage areas to assign services
+                  დააჭირეთ დაზიანებულ ადგილებს სერვისის მისანიჭებლად
                 </Text>
               </View>
             )}
@@ -582,16 +585,16 @@ export default function PhotoTaggingScreen() {
           onDismiss={() => setShowServiceMenu(false)}
           contentContainerStyle={styles.serviceModal}
         >
-          <Text style={styles.modalTitle}>Select Service</Text>
-          <Text style={styles.modalSubtitle}>Choose the service needed for this damage</Text>
+          <Text style={styles.modalTitle}>აირჩიეთ სერვისი</Text>
+          <Text style={styles.modalSubtitle}>აირჩიეთ სერვისი ამ დაზიანებისთვის</Text>
           
           {services.map((service) => (
             <List.Item
               key={service.key}
-              title={service.nameEn}
+              title={service.nameKa}
               description={service.description
-                ? `${service.nameKa} • ${service.description}\n${formatCurrencyGEL(service.basePrice)}`
-                : `${service.nameKa} • ${formatCurrencyGEL(service.basePrice)}`
+                ? `${service.description} • ${formatCurrencyGEL(service.basePrice)}`
+                : formatCurrencyGEL(service.basePrice)
               }
               left={(props) => (
                 <List.Icon
@@ -619,9 +622,9 @@ export default function PhotoTaggingScreen() {
           onDismiss={() => setPriceAdjustmentVisible(false)}
           contentContainerStyle={styles.priceModal}
         >
-          <Text style={styles.modalTitle}>Adjust Price</Text>
+          <Text style={styles.modalTitle}>ფასის კორექტირება</Text>
           <Text style={styles.modalSubtitle}>
-            {editingTag?.serviceName}
+            {editingTag?.serviceNameKa || editingTag?.serviceName}
           </Text>
 
           <View style={styles.priceAdjustment}>
@@ -649,11 +652,11 @@ export default function PhotoTaggingScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.priceHint}>Tap + or - to adjust in 10 GEL increments</Text>
+          <Text style={styles.priceHint}>დააჭირეთ + ან - ფასის შესაცვლელად 10 ლარით</Text>
 
           <TextInput
             mode="outlined"
-            label="Enter price manually"
+            label="შეიყვანეთ ფასი ხელით"
             value={tempPrice.toString()}
             onChangeText={handleManualPriceChange}
             keyboardType="numeric"
@@ -669,14 +672,14 @@ export default function PhotoTaggingScreen() {
               style={styles.removeButton}
               textColor={COLORS.error}
             >
-              Remove
+              წაშლა
             </Button>
             <Button
               mode="contained"
               onPress={confirmPriceChange}
               style={styles.confirmButton}
             >
-              Confirm
+              დადასტურება
             </Button>
           </View>
         </Modal>

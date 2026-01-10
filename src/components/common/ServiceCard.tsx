@@ -1,10 +1,10 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Card, Text, IconButton, Chip } from 'react-native-paper';
-import { Service } from '../../types';
-import { formatCurrency } from '../../utils/helpers';
+import { StyleSheet, View } from 'react-native';
+import { Card, Chip, IconButton, Text } from 'react-native-paper';
 import { COLORS } from '../../config/constants';
 import { SERVICE_CATEGORIES } from '../../config/services';
+import { Service } from '../../types';
+import { formatCurrency } from '../../utils/helpers';
 
 interface ServiceCardProps {
   service: Service;
@@ -21,11 +21,11 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
   onEdit,
   onDelete,
   onToggleStatus,
-  showGeorgian = true,
+  showGeorgian = true, // Always default to Georgian
 }) => {
   const getCategoryLabel = (categoryValue: string) => {
     const category = SERVICE_CATEGORIES.find(cat => cat.value === categoryValue);
-    return showGeorgian ? category?.labelKa || categoryValue : category?.label || categoryValue;
+    return category?.labelKa || categoryValue; // Always use Georgian for categories
   };
 
   return (
@@ -40,9 +40,9 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
         <View style={styles.header}>
           <View style={styles.serviceInfo}>
             <Text variant="titleMedium" style={styles.name}>
-              {showGeorgian ? service.nameKa : service.nameEn}
+              {service.nameKa || service.nameEn}
             </Text>
-            {showGeorgian && (
+            {service.nameKa && service.nameEn && (
               <Text variant="bodySmall" style={styles.englishName}>
                 {service.nameEn}
               </Text>

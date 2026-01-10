@@ -100,8 +100,14 @@ export default function CaseDetailScreen() {
   };
 
   const normalizeService = (service: any) => {
+    // Prioritize Georgian name (serviceNameKa) over English (serviceName)
+    const georgianName = service.serviceNameKa || service.nameKa || '';
+    const englishName = service.serviceName || service.serviceNameEn || service.name || 'Unknown Service';
+    
     return {
-      serviceName: service.serviceName || service.name || 'Unknown Service',
+      serviceName: georgianName || getServiceNameGeorgian(englishName) || englishName,
+      serviceNameKa: georgianName || getServiceNameGeorgian(englishName),
+      serviceNameEn: englishName,
       description: service.description || '',
       price: service.price || service.hourly_rate || service.rate || 0,
       count: service.count || 1,
@@ -454,7 +460,7 @@ export default function CaseDetailScreen() {
 
   const handleSelectServiceFromDB = (service: any) => {
     setSelectedService(service);
-    setNewServiceName(service.nameEn);
+    setNewServiceName(service.nameKa || service.nameEn); // Use Georgian as default
     setNewServicePrice(service.basePrice.toString());
   };
 
@@ -508,9 +514,13 @@ export default function CaseDetailScreen() {
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
       console.log('[Case Detail] Adding service with cPanel ID:', cpanelId);
 
+      // Use Georgian name as primary, English as backup
+      const georgianName = selectedService?.nameKa || getServiceNameGeorgian(newServiceName) || newServiceName;
+      
       const newService = {
-        serviceName: newServiceName,
-        serviceNameKa: selectedService?.nameKa || getServiceNameGeorgian(newServiceName),
+        serviceName: georgianName, // Store Georgian as primary name
+        serviceNameKa: georgianName,
+        serviceNameEn: selectedService?.nameEn || newServiceName, // Store English as backup
         price: parseFloat(newServicePrice) || 0,
         count: parseInt(newServiceCount) || 1,
       };
@@ -522,7 +532,7 @@ export default function CaseDetailScreen() {
 
       // Find existing service by checking both English and Georgian names
       console.log('[Case Detail] Checking for duplicate service:', {
-        newService: { en: newService.serviceName, ka: newService.serviceNameKa },
+        newService: { en: newService.serviceNameEn, ka: newService.serviceNameKa },
         existingCount: existingServices.length
       });
 

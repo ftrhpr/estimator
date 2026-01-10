@@ -1,28 +1,28 @@
-import React, { useState } from 'react';
-import {
-  View,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Linking,
-  Image,
-} from 'react-native';
-import {
-  Text,
-  Button,
-  TextInput,
-  Card,
-  Divider,
-  ActivityIndicator,
-  Portal,
-  Modal,
-  Chip,
-} from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
+import { useState } from 'react';
+import {
+    Alert,
+    Image,
+    KeyboardAvoidingView,
+    Linking,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    View,
+} from 'react-native';
+import {
+    ActivityIndicator,
+    Button,
+    Card,
+    Chip,
+    Divider,
+    Modal,
+    Portal,
+    Text,
+    TextInput,
+} from 'react-native-paper';
 import { saveInspectionWithImages } from '../services/firebase';
 
 export default function InvoiceScreen({ route, navigation }) {
@@ -692,7 +692,6 @@ export default function InvoiceScreen({ route, navigation }) {
                     <View key={serviceIdx} style={styles.serviceRow}>
                       <View style={styles.serviceInfo}>
                         <Text style={styles.serviceNameGe}>{service.name}</Text>
-                        <Text style={styles.serviceNameEn}>({service.nameEn})</Text>
                         {service.count > 1 && (
                           <Text style={styles.serviceCount}> × {service.count}</Text>
                         )}

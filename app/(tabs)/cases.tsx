@@ -3,27 +3,27 @@ import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
-  Alert,
-  Dimensions,
-  FlatList,
-  Linking,
-  RefreshControl,
-  StyleSheet,
-  TouchableOpacity,
-  View,
+    Alert,
+    Dimensions,
+    FlatList,
+    Linking,
+    RefreshControl,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import {
-  ActivityIndicator,
-  Button,
-  Card,
-  Chip,
-  Divider,
-  FAB,
-  IconButton,
-  Menu,
-  Searchbar,
-  Surface,
-  Text
+    ActivityIndicator,
+    Button,
+    Card,
+    Chip,
+    Divider,
+    FAB,
+    IconButton,
+    Menu,
+    Searchbar,
+    Surface,
+    Text
 } from 'react-native-paper';
 
 import { COLORS } from '../../src/config/constants';
@@ -196,6 +196,13 @@ export default function CasesScreen() {
   const getServiceNameGeorgian = (serviceName: string): string => {
     if (!serviceName) return '';
     
+    // First check by key
+    const serviceKey = serviceName.toLowerCase().replace(/\s+/g, '_');
+    if (DEFAULT_SERVICES[serviceKey as keyof typeof DEFAULT_SERVICES]) {
+      return DEFAULT_SERVICES[serviceKey as keyof typeof DEFAULT_SERVICES].nameKa;
+    }
+    
+    // Then check by English name
     for (const key of Object.keys(DEFAULT_SERVICES)) {
       const service = DEFAULT_SERVICES[key as keyof typeof DEFAULT_SERVICES];
       if (service.nameEn.toLowerCase() === serviceName.toLowerCase()) {
@@ -206,9 +213,14 @@ export default function CasesScreen() {
   };
 
   const normalizeService = (service: any) => {
+    // Prioritize Georgian name over English
+    const georgianName = service.serviceNameKa || service.nameKa || '';
+    const englishName = service.serviceName || service.description || service.name || 'Unknown';
+    
     return {
-      serviceName: service.serviceName || service.description || service.name || 'Unknown',
-      serviceNameKa: service.serviceNameKa || service.nameKa || '',
+      serviceName: georgianName || getServiceNameGeorgian(englishName) || englishName,
+      serviceNameKa: georgianName || getServiceNameGeorgian(englishName),
+      serviceNameEn: englishName,
       price: service.price || service.hourly_rate || service.rate || 0,
       count: service.count || 1,
     };

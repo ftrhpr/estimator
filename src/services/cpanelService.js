@@ -3,8 +3,57 @@
  * Syncs invoices from Firebase to cPanel hosting database
  */
 
+import { DEFAULT_SERVICES } from '../config/services';
+
 const CPANEL_API_URL = process.env.EXPO_PUBLIC_CPANEL_API_URL || '';
 const CPANEL_API_KEY = process.env.EXPO_PUBLIC_CPANEL_API_KEY || '';
+
+/**
+ * Get Georgian service name from English name or service key
+ * @param {string} serviceName - English service name or key
+ * @returns {string} Georgian service name
+ */
+const getGeorgianServiceName = (serviceName) => {
+  if (!serviceName) return '';
+  
+  // First check by key
+  const serviceKey = serviceName.toLowerCase().replace(/\s+/g, '_');
+  if (DEFAULT_SERVICES[serviceKey]) {
+    return DEFAULT_SERVICES[serviceKey].nameKa;
+  }
+  
+  // Then check by English name
+  for (const key of Object.keys(DEFAULT_SERVICES)) {
+    const service = DEFAULT_SERVICES[key];
+    if (service.nameEn.toLowerCase() === serviceName.toLowerCase()) {
+      return service.nameKa;
+    }
+  }
+  
+  return serviceName;
+};
+
+/**
+ * Transform services array to use Georgian names
+ * @param {Array} services - Array of service objects
+ * @returns {Array} Services with Georgian names
+ */
+const transformServicesToGeorgian = (services) => {
+  if (!Array.isArray(services)) return [];
+  
+  return services.map(service => {
+    const georgianName = service.serviceNameKa || 
+                         service.nameKa || 
+                         getGeorgianServiceName(service.serviceName || service.name || '');
+    
+    return {
+      ...service,
+      serviceName: georgianName,
+      serviceNameKa: georgianName,
+      originalName: service.serviceName || service.name || '',
+    };
+  });
+};
 
 // Check if cPanel integration is configured
 export const isCPanelConfigured = () => {
@@ -142,6 +191,9 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
     }
     
     // Prepare data for cPanel API - mapped to transfers table structure
+    // Transform services to use Georgian names
+    const georgianServices = transformServicesToGeorgian(invoiceData.services || []);
+    
     const payload = {
       firebaseId: firebaseId,
       customerName: invoiceData.customerName || 'N/A',
@@ -149,7 +201,7 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       carModel: invoiceData.plate || invoiceData.carModel || 'Unknown', // Maps to 'plate' column
       plate: invoiceData.plate || invoiceData.carModel || 'N/A',
       totalPrice: invoiceData.totalPrice || 0,      // Maps to 'amount' column
-      services: invoiceData.services || [],         // Stored in systemLogs
+      services: georgianServices,                    // Stored in systemLogs with Georgian names
       parts: invoiceData.parts || [],               // Stored in parts JSON column
       photosCount: invoiceData.photos?.length || 0, // Stored in systemLogs
       partsCount: invoiceData.parts?.length || 0,   // Stored in systemLogs

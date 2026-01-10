@@ -1,34 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useState } from 'react';
 import {
-  View,
-  StyleSheet,
-  Dimensions,
-  Image,
-  Pressable,
-  Alert,
-  ScrollView,
-  TouchableOpacity,
+    Alert,
+    Dimensions,
+    Image,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import {
-  Text,
-  Button,
-  Portal,
-  Modal,
-  TextInput,
-  Card,
-  Divider,
-  Menu,
-} from 'react-native-paper';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import {
-  GestureHandlerRootView,
-  PinchGestureHandler,
+    GestureHandlerRootView,
+    PinchGestureHandler,
 } from 'react-native-gesture-handler';
+import {
+    Button,
+    Card,
+    Divider,
+    Menu,
+    Modal,
+    Portal,
+    Text,
+    TextInput,
+} from 'react-native-paper';
 import Animated, {
-  useAnimatedGestureHandler,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
+    useAnimatedGestureHandler,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
@@ -482,7 +482,6 @@ export default function ZoneEstimatorScreen({ route, navigation }) {
                         )}
                       </View>
                       <Text style={styles.serviceNameGeorgian}>{service.name}</Text>
-                      <Text style={styles.serviceNameEn}>{service.nameEn}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -496,7 +495,7 @@ export default function ZoneEstimatorScreen({ route, navigation }) {
                 {selectedServices.map(service => (
                   <View key={service.id} style={styles.priceRow}>
                     <Text style={styles.priceLabel}>
-                      {service.name} ({service.nameEn})
+                      {service.name}
                     </Text>
                     <TextInput
                       mode="outlined"
