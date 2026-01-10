@@ -132,10 +132,14 @@ export default function CasesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              console.log('[Delete] Starting delete for caseId:', caseId);
+              
               // Find the case to get cPanel invoice ID
               const caseToDelete = cases.find(c => c.id === caseId);
               let cpanelDeleted = false;
               let cpanelId: string | undefined = caseToDelete?.cpanelInvoiceId || undefined;
+              
+              console.log('[Delete] Case found:', caseToDelete ? 'yes' : 'no', 'cpanelId:', cpanelId);
               
               // Try to get cPanel ID if not stored locally
               if (!cpanelId) {
@@ -143,6 +147,7 @@ export default function CasesScreen() {
                   const { fetchCPanelInvoiceId } = await import('../../src/services/cpanelService');
                   const fetchedId = await fetchCPanelInvoiceId(caseId);
                   cpanelId = fetchedId || undefined;
+                  console.log('[Delete] Fetched cPanel ID:', cpanelId);
                 } catch (e) {
                   console.log('[Delete] Could not fetch cPanel ID:', e);
                 }
@@ -160,10 +165,11 @@ export default function CasesScreen() {
                 }
               }
               
-              // Delete from Firebase
+              // Delete from Firebase - await and verify
+              console.log('[Delete] Deleting from Firebase:', caseId);
               const { deleteInspection } = await import('../../src/services/firebase');
               await deleteInspection(caseId);
-              console.log('[Delete] Firebase delete successful:', caseId);
+              console.log('[Delete] Firebase delete completed for:', caseId);
               
               // Remove from local state for immediate UI feedback
               setCases(prevCases => prevCases.filter(c => c.id !== caseId));
@@ -175,9 +181,11 @@ export default function CasesScreen() {
               } else {
                 Alert.alert('✅ წაშლილია', 'ინვოისი წაიშალა Firebase-დან');
               }
-            } catch (error) {
-              console.error('Error deleting case:', error);
-              Alert.alert('❌ შეცდომა', 'ინვოისის წაშლა ვერ მოხერხდა');
+            } catch (error: any) {
+              console.error('[Delete] Error deleting case:', error);
+              console.error('[Delete] Error message:', error?.message);
+              console.error('[Delete] Error stack:', error?.stack);
+              Alert.alert('❌ შეცდომა', `ინვოისის წაშლა ვერ მოხერხდა: ${error?.message || 'Unknown error'}`);
             }
           }
         }

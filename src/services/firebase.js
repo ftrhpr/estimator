@@ -1,5 +1,5 @@
 import { getApps, initializeApp } from 'firebase/app';
-import { addDoc, collection, deleteDoc, doc, getDocs, getFirestore, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, getFirestore, orderBy, query, updateDoc, where } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import { syncInvoiceToCPanel } from './cpanelService';
 
@@ -319,10 +319,39 @@ const syncToCPanel = async (inspectionId, updates, cpanelInvoiceId, docRef) => {
  */
 export const deleteInspection = async (inspectionId) => {
   try {
+    console.log('[Firebase] deleteInspection called with ID:', inspectionId);
+    
+    if (!inspectionId) {
+      throw new Error('No inspection ID provided');
+    }
+    
     const docRef = doc(db, COLLECTIONS.INSPECTIONS, inspectionId);
+    console.log('[Firebase] Deleting document from collection:', COLLECTIONS.INSPECTIONS);
+    
+    // First, verify the document exists
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) {
+      console.log('[Firebase] Document does not exist, may have been deleted already:', inspectionId);
+      return { success: true, id: inspectionId, alreadyDeleted: true };
+    }
+    
+    console.log('[Firebase] Document exists, proceeding with delete...');
+    
+    // Delete the document
     await deleteDoc(docRef);
+    
+    // Verify deletion by trying to read it again
+    const verifySnap = await getDoc(docRef);
+    if (verifySnap.exists()) {
+      console.error('[Firebase] Document still exists after delete! This may be a permissions issue.');
+      throw new Error('Delete failed - document still exists. Check Firebase security rules.');
+    }
+    
+    console.log('[Firebase] Document deleted and verified successfully:', inspectionId);
+    return { success: true, id: inspectionId };
   } catch (error) {
-    console.error('Error deleting inspection:', error);
+    console.error('[Firebase] Error deleting inspection:', error);
+    console.error('[Firebase] Error details:', error.message);
     throw error;
   }
 };
