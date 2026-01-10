@@ -200,6 +200,8 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       customerPhone: invoiceData.customerPhone || '',
       carModel: invoiceData.plate || invoiceData.carModel || 'Unknown', // Maps to 'plate' column
       plate: invoiceData.plate || invoiceData.carModel || 'N/A',
+      vehicleMake: invoiceData.carMake || '',       // Vehicle make (e.g., Toyota, BMW)
+      vehicleModel: invoiceData.carModel || '',     // Vehicle model (e.g., Camry, X5)
       totalPrice: invoiceData.totalPrice || 0,      // Maps to 'amount' column
       services: georgianServices,                    // Stored in systemLogs with Georgian names
       parts: invoiceData.parts || [],               // Stored in parts JSON column
