@@ -69,6 +69,7 @@ export default function CaseDetailScreen() {
   const [showEditServiceModal, setShowEditServiceModal] = useState(false);
   const [editingServiceIndex, setEditingServiceIndex] = useState<number | null>(null);
   const [editServiceName, setEditServiceName] = useState('');
+  const [editServiceDescription, setEditServiceDescription] = useState('');
   const [editServicePrice, setEditServicePrice] = useState('');
   const [editServiceCount, setEditServiceCount] = useState('1');
 
@@ -344,6 +345,7 @@ export default function CaseDetailScreen() {
 
     setEditingServiceIndex(index);
     setEditServiceName(normalized.serviceName);
+    setEditServiceDescription(normalized.description || '');
     setEditServicePrice(normalized.price.toString());
     setEditServiceCount(normalized.count.toString());
     setShowEditServiceModal(true);
@@ -384,6 +386,7 @@ export default function CaseDetailScreen() {
         ...updatedServices[editingServiceIndex],
         serviceName: editServiceName,
         serviceNameKa: getServiceNameGeorgian(editServiceName),
+        description: editServiceDescription,
         price: parseFloat(editServicePrice) || 0,
         count: parseInt(editServiceCount) || 1,
       };
@@ -399,6 +402,7 @@ export default function CaseDetailScreen() {
       setShowEditServiceModal(false);
       setEditingServiceIndex(null);
       setEditServiceName('');
+      setEditServiceDescription('');
       setEditServicePrice('');
       setEditServiceCount('1');
       Alert.alert('✅ Success', 'Service updated successfully');
@@ -1156,6 +1160,22 @@ export default function CaseDetailScreen() {
               />
             </View>
 
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputGroupLabel}>აღწერა (არასავალდებულო)</Text>
+              <TextInput
+                value={editServiceDescription}
+                onChangeText={setEditServiceDescription}
+                mode="outlined"
+                placeholder="დაამატეთ სერვისის აღწერა"
+                style={styles.enhancedInput}
+                outlineStyle={styles.enhancedInputOutline}
+                activeOutlineColor={COLORS.primary}
+                textColor={COLORS.text.primary}
+                multiline
+                numberOfLines={2}
+              />
+            </View>
+
             <View style={styles.inputRow}>
               <View style={[styles.inputGroup, { flex: 1.5, marginRight: 12 }]}>
                 <Text style={styles.inputGroupLabel}>ფასი (₾)</Text>
@@ -1223,6 +1243,7 @@ export default function CaseDetailScreen() {
                 setShowEditServiceModal(false);
                 setEditingServiceIndex(null);
                 setEditServiceName('');
+                setEditServiceDescription('');
                 setEditServicePrice('');
                 setEditServiceCount('1');
               }}

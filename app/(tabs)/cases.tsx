@@ -23,7 +23,7 @@ import {
     Menu,
     Searchbar,
     Surface,
-    Text,
+    Text
 } from 'react-native-paper';
 
 import { COLORS } from '../../src/config/constants';
@@ -67,6 +67,14 @@ export default function CasesScreen() {
   const [filterMenuVisible, setFilterMenuVisible] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'cost_high' | 'cost_low'>('newest');
   const [showSearch, setShowSearch] = useState(false);
+
+  // Filter states
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'today' | 'recent' | 'old'>('all');
+  const [priceRangeFilter, setPriceRangeFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
+  const [dateRangeFilter, setDateRangeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [caseStatusFilter, setCaseStatusFilter] = useState<'all' | 'Pending' | 'In Progress' | 'Completed'>('all');
+  const [serviceFilterKey, setServiceFilterKey] = useState<string>('all');
 
   const loadCases = async () => {
     try {
@@ -176,14 +184,46 @@ export default function CasesScreen() {
 
   const filterAndSortCases = () => {
     let filteredCases = cases.filter(caseItem => {
+      // Search filter
       const searchLower = searchQuery.toLowerCase();
-      return (
+      const matchesSearch = !searchQuery || (
         (caseItem.plate?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.carModel?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.customerName?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.customerPhone?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.services?.some(s => s.serviceName.toLowerCase().includes(searchLower)) || false)
       );
+
+      // Status filter (based on age)
+      const daysSinceCreated = Math.floor((Date.now() - new Date(caseItem.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+      const matchesStatus = statusFilter === 'all' || (
+        (statusFilter === 'today' && daysSinceCreated <= 1) ||
+        (statusFilter === 'recent' && daysSinceCreated > 1 && daysSinceCreated <= 7) ||
+        (statusFilter === 'old' && daysSinceCreated > 7)
+      );
+
+      // Price range filter
+      const matchesPriceRange = priceRangeFilter === 'all' || (
+        (priceRangeFilter === 'low' && caseItem.totalPrice < 200) ||
+        (priceRangeFilter === 'medium' && caseItem.totalPrice >= 200 && caseItem.totalPrice < 500) ||
+        (priceRangeFilter === 'high' && caseItem.totalPrice >= 500)
+      );
+
+      // Date range filter
+      const matchesDateRange = dateRangeFilter === 'all' || (
+        (dateRangeFilter === 'today' && daysSinceCreated === 0) ||
+        (dateRangeFilter === 'week' && daysSinceCreated <= 7) ||
+        (dateRangeFilter === 'month' && daysSinceCreated <= 30)
+      );
+
+      // Case status filter
+      const matchesCaseStatus = caseStatusFilter === 'all' || caseItem.status === caseStatusFilter;
+
+      // Service category filter
+      const matchesService = serviceFilterKey === 'all' || 
+        (caseItem.services?.some(s => s.key === serviceFilterKey) || false);
+
+      return matchesSearch && matchesStatus && matchesPriceRange && matchesDateRange && matchesCaseStatus && matchesService;
     });
 
     // Sort cases
@@ -315,6 +355,80 @@ export default function CasesScreen() {
       case 'cost_low': return 'დაბალი';
       default: return 'Sort';
     }
+  };
+
+  const getActiveFilterCount = () => {
+    let count = 0;
+    if (statusFilter !== 'all') count++;
+    if (priceRangeFilter !== 'all') count++;
+    if (dateRangeFilter !== 'all') count++;
+    if (caseStatusFilter !== 'all') count++;
+    if (serviceFilterKey !== 'all') count++;
+    return count;
+  };
+
+  const clearAllFilters = () => {
+    setStatusFilter('all');
+    setPriceRangeFilter('all');
+    setDateRangeFilter('all');
+    setCaseStatusFilter('all');
+    setServiceFilterKey('all');
+  };
+
+  const hasActiveFilters = () => getActiveFilterCount() > 0;
+
+  // Get unique services for filter dropdown
+  const getAvailableServices = () => {
+    const serviceMap = new Map();
+    cases.forEach(caseItem => {
+      caseItem.services?.forEach(service => {
+        if (service.key && !serviceMap.has(service.key)) {
+          serviceMap.set(service.key, service.serviceName);
+        }
+      });
+    });
+    return Array.from(serviceMap.entries()).map(([key, name]) => ({
+      key,
+      name,
+      nameKa: getServiceNameGeorgian(name)
+    })).sort((a, b) => a.nameKa.localeCompare(b.nameKa));
+  };
+
+  // Get unique case statuses for filter
+  const getAvailableStatuses = () => {
+    const statuses = new Set(cases.map(c => c.status).filter(Boolean));
+    return Array.from(statuses) as ('Pending' | 'In Progress' | 'Completed')[];
+  };
+
+  // Get Georgian labels for filter options
+  const getFilterLabel = (filterType: string, value: string): string => {
+    const filterLabels: Record<string, Record<string, string>> = {
+      status: {
+        all: 'ყველა',
+        today: 'დღეს',
+        recent: 'ბოლო 7 დღე',
+        old: '7+ დღე'
+      },
+      price: {
+        all: 'ყველა',
+        low: 'დაბალი (<₾200)',
+        medium: 'საშუალო (₾200-500)',
+        high: 'მაღალი (>₾500)'
+      },
+      date: {
+        all: 'ყველა',
+        today: 'დღეს',
+        week: 'ამ კვირაში',
+        month: 'ამ თვეში'
+      },
+      caseStatus: {
+        all: 'ყველა',
+        'Pending': 'მოლოდინში',
+        'In Progress': 'მიმდინარე',
+        'Completed': 'დასრულებული'
+      }
+    };
+    return filterLabels[filterType]?.[value] || value;
   };
 
   if (loading && !refreshing) {

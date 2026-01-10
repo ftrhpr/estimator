@@ -41,6 +41,7 @@ interface PhotoTag {
   serviceKey: string;
   serviceName: string;
   serviceNameKa: string;
+  description?: string;
   price: number;
   originalPrice: number;
 }
@@ -224,11 +225,12 @@ export default function PhotoTaggingScreen() {
       serviceKey: service.key,
       serviceName: service.nameEn,
       serviceNameKa: service.nameKa,
+      description: service.description || '',
       price: service.basePrice,
       originalPrice: service.basePrice,
     };
 
-    setPhotos(prev => prev.map((photo, index) => 
+    setPhotos(prev => prev.map((photo, index) =>
       index === currentPhotoIndex
         ? { ...photo, tags: [...photo.tags, newTag] }
         : photo
