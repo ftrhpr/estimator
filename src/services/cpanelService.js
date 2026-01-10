@@ -93,9 +93,6 @@ const makeRequest = async (endpoint, data = null, method = 'POST') => {
     }
     
     console.log(`[cPanel API] ${method} ${url}`);
-    console.log(`[cPanel API] Headers:`, options.headers);
-    console.log(`[cPanel API] API Key (first 10 chars): ${CPANEL_API_KEY.substring(0, 10)}...`);
-    console.log(`[cPanel API] API Key length: ${CPANEL_API_KEY.length}`);
     if (data && method !== 'GET') {
       console.log(`[cPanel API] Request body:`, data);
     }
@@ -104,14 +101,10 @@ const makeRequest = async (endpoint, data = null, method = 'POST') => {
     let responseData = null;
     
     try {
-      // Read response body as text first
       const responseText = await response.text();
-      
-      // Try to parse as JSON
       try {
         responseData = JSON.parse(responseText);
       } catch (parseError) {
-        // If JSON parsing fails, use the raw text
         console.warn('[cPanel API] Response is not JSON, using raw text');
         responseData = {
           success: !response.ok,
@@ -190,15 +183,63 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       };
     }
     
-    // Prepare data for cPanel API - mapped to transfers table structure
-    // Transform services to use Georgian names
     const georgianServices = transformServicesToGeorgian(invoiceData.services || []);
     
-    // Log photos data for debugging
-    console.log('[cPanel API] Photos data received:', {
-      photosCount: invoiceData.photos?.length || 0,
-      photosType: typeof invoiceData.photos,
-      firstPhotoUrl: invoiceData.photos?.[0]?.url || invoiceData.photos?.[0] || 'none',
+    // --- Enrich photos with tagging information ---
+    // Maps each photo to its associated damage tags from the parts array
+    const photoUrls = invoiceData.photos || invoiceData.imageURL || invoiceData.imageUrls || [];
+    
+    const enrichedPhotos = photoUrls.map((photoData, photoIndex) => {
+      // Extract photo URL and metadata
+      const photoUrl = typeof photoData === 'string' ? photoData : (photoData.url || photoData);
+      const photoLabel = typeof photoData === 'object' ? (photoData.label || `Photo ${photoIndex + 1}`) : `Photo ${photoIndex + 1}`;
+      
+      // Find all tags/damage data for this specific photo
+      const photoTags = [];
+      if (invoiceData.parts && Array.isArray(invoiceData.parts)) {
+        invoiceData.parts.forEach(part => {
+          if (part.damages && Array.isArray(part.damages)) {
+            part.damages.forEach(damage => {
+              // Match damage to this photo by index
+              if (damage.photoIndex === photoIndex || damage.photoIndex === photoIndex.toString()) {
+                if (damage.services && Array.isArray(damage.services)) {
+                  damage.services.forEach(service => {
+                    photoTags.push({
+                      serviceName: service.name || part.partName || 'Unknown',
+                      servicePrice: service.price || 0,
+                      x: damage.x || 0,
+                      y: damage.y || 0,
+                      xPercent: damage.xPercent || 0,
+                      yPercent: damage.yPercent || 0,
+                    });
+                  });
+                }
+              }
+            });
+          }
+        });
+      }
+      
+      // Return enriched photo object with tags
+      return {
+        url: photoUrl,
+        label: photoLabel,
+        tags: photoTags,
+        tagCount: photoTags.length,
+        uploadedAt: (typeof photoData === 'object' ? photoData.uploadedAt : null) || new Date().toISOString(),
+      };
+    });
+    
+    // Enhanced debugging log
+    console.log('[cPanel API] Photos enriched with tagging info:', {
+      totalPhotos: enrichedPhotos.length,
+      photosWithTags: enrichedPhotos.filter(p => p.tagCount > 0).length,
+      totalTags: enrichedPhotos.reduce((sum, p) => sum + p.tagCount, 0),
+      photoDetails: enrichedPhotos.map(p => ({
+        label: p.label,
+        tagCount: p.tagCount,
+        tags: p.tags,
+      })),
     });
     
     const payload = {
@@ -211,8 +252,8 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       totalPrice: invoiceData.totalPrice || 0,
       services: georgianServices,
       parts: invoiceData.parts || [],
-      photos: invoiceData.photos || [],              // Actual photo URLs from Firebase Storage
-      photosCount: invoiceData.photos?.length || 0,
+      photos: enrichedPhotos,  // Send enriched photos with tagging information
+      photosCount: enrichedPhotos.length,
       partsCount: invoiceData.parts?.length || 0,
       status: invoiceData.status || 'New',
       serviceDate: invoiceData.createdAt || new Date().toISOString(),
@@ -220,7 +261,6 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
     };
     
     console.log('[cPanel API] Syncing invoice:', firebaseId);
-    console.log('[cPanel API] Payload photos field:', JSON.stringify(payload.photos));
     
     const response = await makeRequest('create-invoice.php', payload);
     
@@ -234,8 +274,6 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
     };
   } catch (error) {
     console.error('[cPanel API] Sync failed:', error);
-    
-    // Don't throw error - we don't want to block the app if cPanel sync fails
     return {
       success: false,
       error: error.message,
@@ -278,7 +316,6 @@ export const batchSyncInvoices = async (invoices) => {
         failCount++;
       }
       
-      // Small delay to avoid overwhelming the server
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     
@@ -308,21 +345,13 @@ export const batchSyncInvoices = async (invoices) => {
  */
 export const deleteInvoiceFromCPanel = async (invoiceId) => {
   if (!isCPanelConfigured()) {
-    console.log('[cPanel API] cPanel not configured, skipping delete');
-    return {
-      success: false,
-      skipped: true,
-      reason: 'Not configured',
-    };
+    return { success: false, skipped: true, reason: 'Not configured' };
   }
   
   try {
     console.log('[cPanel API] Deleting invoice:', invoiceId);
-    
     const response = await makeRequest('delete-invoice.php', { invoiceId }, 'DELETE');
-    
     console.log('[cPanel API] Delete successful:', response);
-    
     return {
       success: response.success !== false,
       invoiceId: invoiceId,
@@ -330,48 +359,41 @@ export const deleteInvoiceFromCPanel = async (invoiceId) => {
     };
   } catch (error) {
     console.error('[cPanel API] Delete failed:', error);
-    
-    // Don't throw error - we don't want to block the app if cPanel delete fails
-    return {
-      success: false,
-      error: error.message,
-      invoiceId: invoiceId,
-    };
+    return { success: false, error: error.message, invoiceId: invoiceId };
   }
 };
 
 /**
  * Update an invoice in cPanel
  * @param {string} invoiceId - cPanel invoice ID to update
- * @param {object} updateData - Data to update (customerName, customerPhone, carModel, totalPrice, services, parts, status, etc.)
+ * @param {object} updateData - Data to update
  * @returns {Promise<object>} Update result
  */
 export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
   if (!isCPanelConfigured()) {
-    console.log('[cPanel API] cPanel not configured, skipping update');
-    return {
-      success: false,
-      skipped: true,
-      reason: 'Not configured',
-    };
+    return { success: false, skipped: true, reason: 'Not configured' };
   }
   
   if (!invoiceId) {
-    console.log('[cPanel API] No cPanel invoice ID provided, skipping update');
-    return {
-      success: false,
-      reason: 'No cPanel ID',
-    };
+    return { success: false, reason: 'No cPanel ID' };
   }
   
   try {
     console.log('[cPanel API] Updating invoice:', invoiceId);
     
-    // Prepare update payload - only include fields that were provided
     const payload = {
       invoiceId: invoiceId,
       ...updateData,
     };
+    
+    // --- KEY CHANGE: Robustly find and normalize photo URLs for updates ---
+    const photoUrls = payload.photos || payload.imageURL || payload.imageUrls;
+    if (photoUrls !== undefined) { // Check for undefined to handle empty arrays correctly
+        payload.photos = photoUrls;
+        // Clean up other variants to avoid sending confusing/duplicate data
+        if (payload.imageURL) delete payload.imageURL;
+        if (payload.imageUrls) delete payload.imageUrls;
+    }
     
     console.log('[cPanel API] Update payload:', payload);
     
@@ -387,13 +409,7 @@ export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
     };
   } catch (error) {
     console.error('[cPanel API] Update failed:', error);
-    
-    // Don't throw error - we don't want to block the app if cPanel update fails
-    return {
-      success: false,
-      error: error.message,
-      invoiceId: invoiceId,
-    };
+    return { success: false, error: error.message, invoiceId: invoiceId };
   }
 };
 
@@ -403,20 +419,7 @@ export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
  * @returns {Promise<object>} Sync status
  */
 export const checkSyncStatus = async (firebaseId) => {
-  try {
-    // This would require an additional endpoint on cPanel
-    // For now, return not implemented
-    return {
-      success: false,
-      error: 'Not implemented yet',
-    };
-  } catch (error) {
-    console.error('[cPanel API] Check status error:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
+  return { success: false, error: 'Not implemented yet' };
 };
 
 /**
@@ -425,25 +428,17 @@ export const checkSyncStatus = async (firebaseId) => {
  * @returns {Promise<string|null>} cPanel invoice ID if found
  */
 export const fetchCPanelInvoiceId = async (firebaseId) => {
-  if (!isCPanelConfigured()) {
-    console.log('[cPanel API] cPanel not configured, cannot fetch invoice ID');
-    return null;
-  }
+  if (!isCPanelConfigured()) return null;
   
   try {
     console.log('[cPanel API] Fetching cPanel invoice ID for Firebase ID:', firebaseId);
-    
     const response = await makeRequest('get-invoice-id.php', { firebaseId }, 'GET');
-    
-    // Response structure: { success: true, data: { cpanelInvoiceId: '123', firebaseId: 'abc' } }
     const cpanelId = response.data?.cpanelInvoiceId || response.cpanelInvoiceId;
     
     if (response.success && cpanelId) {
       console.log('[cPanel API] Found cPanel invoice ID:', cpanelId);
       return cpanelId;
     }
-    
-    console.log('[cPanel API] cPanel invoice ID not found for Firebase ID:', firebaseId);
     return null;
   } catch (error) {
     console.error('[cPanel API] Error fetching invoice ID:', error);
@@ -452,44 +447,27 @@ export const fetchCPanelInvoiceId = async (firebaseId) => {
 };
 
 /**
- * Fetch invoice data from cPanel (for syncing updates from cPanel back to app)
+ * Fetch invoice data from cPanel
  * @param {string} cpanelInvoiceId - cPanel invoice ID
- * @param {string} firebaseId - Firebase document ID (optional, if cpanelInvoiceId not available)
- * @returns {Promise<object|null>} Invoice data in app format or null if not found
+ * @param {string} firebaseId - Firebase document ID (optional)
+ * @returns {Promise<object|null>} Invoice data
  */
 export const fetchInvoiceFromCPanel = async (cpanelInvoiceId = null, firebaseId = null) => {
-  if (!isCPanelConfigured()) {
-    console.log('[cPanel API] cPanel not configured, cannot fetch invoice');
-    return null;
-  }
-  
-  if (!cpanelInvoiceId && !firebaseId) {
-    console.log('[cPanel API] No invoice ID provided');
-    return null;
-  }
-  
+  if (!isCPanelConfigured() || (!cpanelInvoiceId && !firebaseId)) return null;
+
   try {
-    console.log('[cPanel API] Fetching invoice from cPanel:', { cpanelInvoiceId, firebaseId });
+    const params = { fullData: 'true' };
+    if (cpanelInvoiceId) params.invoiceId = cpanelInvoiceId;
+    if (firebaseId) params.firebaseId = firebaseId;
     
-    const params = {
-      fullData: 'true', // Request full invoice data, not just ID
-    };
-    if (cpanelInvoiceId) {
-      params.invoiceId = cpanelInvoiceId;
-    }
-    if (firebaseId) {
-      params.firebaseId = firebaseId;
-    }
+    console.log('[cPanel API] Fetching invoice from cPanel:', params);
     
-    // Use existing get-invoice-id.php endpoint with fullData parameter
     const response = await makeRequest('get-invoice-id.php', params, 'GET');
     
     if (response.success && response.data) {
       console.log('[cPanel API] Invoice fetched successfully:', response.data);
       return response.data;
     }
-    
-    console.log('[cPanel API] Invoice not found in cPanel');
     return null;
   } catch (error) {
     console.error('[cPanel API] Error fetching invoice:', error);
