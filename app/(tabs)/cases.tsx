@@ -45,6 +45,7 @@ interface InspectionCase {
   customerName?: string;
   customerPhone: string;
   carModel?: string;
+  plate?: string;
   totalPrice: number;
   services?: Array<{ serviceName: string; price: number; count: number }>;
   parts?: any[];
@@ -77,6 +78,7 @@ export default function CasesScreen() {
         customerName: inspection.customerName || 'N/A',
         customerPhone: inspection.customerPhone || 'N/A',
         carModel: inspection.carModel || 'Unknown',
+        plate: inspection.plate || inspection.carModel || 'N/A',
         totalPrice: inspection.totalPrice || 0,
         services: inspection.services || [],
         parts: inspection.parts || [],
@@ -176,6 +178,7 @@ export default function CasesScreen() {
     let filteredCases = cases.filter(caseItem => {
       const searchLower = searchQuery.toLowerCase();
       return (
+        (caseItem.plate?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.carModel?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.customerName?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.customerPhone?.toLowerCase() || '').includes(searchLower) ||
@@ -217,11 +220,11 @@ export default function CasesScreen() {
           <View style={styles.cardTopRow}>
             <View style={styles.vehicleInfo}>
               <View style={[styles.vehicleIcon, { backgroundColor: item.statusColor + '20' }]}>
-                <MaterialCommunityIcons name="car" size={24} color={item.statusColor} />
+                <MaterialCommunityIcons name="car" size={28} color={item.statusColor} />
               </View>
               <View style={styles.vehicleDetails}>
                 <Text style={styles.vehicleModel} numberOfLines={1}>
-                  {item.carModel || 'Unknown Vehicle'}
+                  {item.plate || item.carModel || 'No Plate'}
                 </Text>
                 <Text style={styles.customerNameText} numberOfLines={1}>
                   {item.customerName}
@@ -242,7 +245,7 @@ export default function CasesScreen() {
 
           {/* Middle Row: Phone */}
           <View style={styles.phoneRow}>
-            <MaterialCommunityIcons name="phone" size={16} color={COLORS.text.secondary} />
+            <MaterialCommunityIcons name="phone" size={18} color={COLORS.text.secondary} />
             <Text style={styles.phoneText}>{item.customerPhone}</Text>
             <View style={styles.statusBadge}>
               <Text style={styles.statusText}>{item.status}</Text>
@@ -276,7 +279,7 @@ export default function CasesScreen() {
 
           {/* Action Row - One-handed friendly at bottom */}
           <View style={styles.cardActions}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.cardActionButton}
               onPress={() => {
                 const cleanPhone = item.customerPhone.replace(/\D/g, '');
@@ -284,19 +287,19 @@ export default function CasesScreen() {
                 Linking.openURL(`whatsapp://send?phone=${whatsappPhone}`);
               }}
             >
-              <MaterialCommunityIcons name="whatsapp" size={22} color="#25D366" />
+              <MaterialCommunityIcons name="whatsapp" size={24} color="#25D366" />
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.cardActionButton}
               onPress={() => Linking.openURL(`tel:${item.customerPhone}`)}
             >
-              <MaterialCommunityIcons name="phone-outline" size={22} color={COLORS.primary} />
+              <MaterialCommunityIcons name="phone-outline" size={24} color={COLORS.primary} />
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.cardActionButton, styles.deleteAction]}
               onPress={() => handleDeleteCase(item.id, item.customerName || 'Customer')}
             >
-              <MaterialCommunityIcons name="trash-can-outline" size={22} color={COLORS.error} />
+              <MaterialCommunityIcons name="trash-can-outline" size={24} color={COLORS.error} />
             </TouchableOpacity>
           </View>
         </Card.Content>
@@ -478,56 +481,65 @@ const styles = StyleSheet.create({
   // Header
   header: {
     backgroundColor: '#fff',
-    paddingTop: 50,
-    paddingBottom: 12,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
+    paddingTop: 56,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    marginBottom: 4,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
+    fontSize: 32,
+    fontWeight: '800',
     color: COLORS.text.primary,
+    letterSpacing: -0.5,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   searchBar: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderRadius: 12,
+    marginHorizontal: 20,
+    marginTop: 12,
+    borderRadius: 16,
     elevation: 0,
     backgroundColor: '#F1F5F9',
-    height: 44,
+    height: 48,
   },
   searchInput: {
     fontSize: 15,
+    minHeight: 48,
   },
   statsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     alignItems: 'center',
+    backgroundColor: COLORS.background,
+    marginHorizontal: 20,
+    borderRadius: 16,
+    marginTop: 12,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '800',
     color: COLORS.primary,
+    letterSpacing: -0.3,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 13,
     color: COLORS.text.secondary,
-    marginTop: 2,
+    marginTop: 4,
+    fontWeight: '500',
   },
   statDivider: {
     width: 1,
@@ -536,33 +548,36 @@ const styles = StyleSheet.create({
   },
   sortChip: {
     backgroundColor: COLORS.primary + '15',
-    height: 28,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   sortChipText: {
-    fontSize: 12,
+    fontSize: 13,
     color: COLORS.primary,
+    fontWeight: '600',
   },
 
   // List
   listContent: {
-    padding: 16,
+    padding: 20,
     paddingBottom: 120,
   },
   cardTouchable: {
-    marginBottom: 12,
+    marginBottom: 16,
   },
   caseCard: {
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
     backgroundColor: '#fff',
+    elevation: 2,
   },
   cardAccent: {
-    height: 5,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    height: 6,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   cardContent: {
-    padding: 16,
+    padding: 20,
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -575,104 +590,115 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   vehicleIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 56,
+    height: 56,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
   vehicleDetails: {
-    marginLeft: 12,
+    marginLeft: 14,
     flex: 1,
   },
   vehicleModel: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     color: COLORS.text.primary,
+    letterSpacing: -0.2,
   },
   customerNameText: {
     fontSize: 14,
     color: COLORS.text.secondary,
-    marginTop: 2,
+    marginTop: 4,
+    fontWeight: '500',
   },
   priceContainer: {
     alignItems: 'flex-end',
+    marginLeft: 12,
   },
   priceValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '800',
     color: COLORS.primary,
+    letterSpacing: -0.3,
   },
   timeChip: {
-    marginTop: 4,
-    height: 26,
+    marginTop: 6,
+    height: 28,
+    paddingHorizontal: 10,
   },
   timeChipText: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   phoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 16,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
   },
   phoneText: {
     fontSize: 14,
     color: COLORS.text.secondary,
-    marginLeft: 8,
+    marginLeft: 10,
     flex: 1,
+    fontWeight: '500',
   },
   statusBadge: {
     backgroundColor: COLORS.primary + '15',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
   statusText: {
     fontSize: 12,
     color: COLORS.primary,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   servicesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
+    gap: 10,
+    marginTop: 14,
   },
   serviceChip: {
     backgroundColor: '#EEF2FF',
-    height: 28,
+    height: 30,
+    paddingHorizontal: 12,
   },
   serviceChipText: {
     fontSize: 12,
     color: '#4F46E5',
+    fontWeight: '600',
   },
   moreChip: {
     backgroundColor: '#F1F5F9',
-    height: 28,
+    height: 30,
+    paddingHorizontal: 12,
   },
   moreChipText: {
     fontSize: 12,
     color: COLORS.text.secondary,
+    fontWeight: '600',
   },
   
   // Card Actions - Bottom for one-handed use
   cardActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: 16,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
-    gap: 8,
+    gap: 10,
   },
   cardActionButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     backgroundColor: '#F8FAFC',
     justifyContent: 'center',
     alignItems: 'center',
@@ -708,10 +734,10 @@ const styles = StyleSheet.create({
   // FAB
   fab: {
     position: 'absolute',
-    right: 16,
-    bottom: 32,
+    right: 20,
+    bottom: 36,
     backgroundColor: COLORS.primary,
-    borderRadius: 16,
+    borderRadius: 20,
     elevation: 6,
     shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 4 },

@@ -146,7 +146,8 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       firebaseId: firebaseId,
       customerName: invoiceData.customerName || 'N/A',
       customerPhone: invoiceData.customerPhone || '',
-      carModel: invoiceData.carModel || 'Unknown', // Maps to 'plate' column
+      carModel: invoiceData.plate || invoiceData.carModel || 'Unknown', // Maps to 'plate' column
+      plate: invoiceData.plate || invoiceData.carModel || 'N/A',
       totalPrice: invoiceData.totalPrice || 0,      // Maps to 'amount' column
       services: invoiceData.services || [],         // Stored in systemLogs
       parts: invoiceData.parts || [],               // Stored in parts JSON column

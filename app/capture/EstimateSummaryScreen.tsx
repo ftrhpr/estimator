@@ -61,6 +61,7 @@ export default function EstimateSummaryScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [carModel, setCarModel] = useState('');
+  const [plate, setPlate] = useState('');
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -145,11 +146,12 @@ export default function EstimateSummaryScreen() {
         const recentCustomer = sortedInspections[0];
         setCustomerName(recentCustomer.customerName || '');
         setCarModel(recentCustomer.carModel || '');
-        
+        setPlate(recentCustomer.plate || recentCustomer.carModel || '');
+
         // Show a notification that customer was found
         Alert.alert(
           'Customer Found',
-          `Welcome back ${recentCustomer.customerName || 'Customer'}!\nVehicle: ${recentCustomer.carModel || 'Not specified'}`,
+          `Welcome back ${recentCustomer.customerName || 'Customer'}!\nPlate: ${recentCustomer.plate || recentCustomer.carModel || 'Not specified'}`,
           [{ text: 'OK' }]
         );
         
@@ -337,6 +339,7 @@ export default function EstimateSummaryScreen() {
         customerName: customerInfo.name || customerName || 'N/A',
         customerPhone: customerInfo.phone,
         carModel: carModel || 'Unknown',
+        plate: plate || carModel || 'N/A',
         totalPrice: getTotalPrice(),
         services: allServices,
         photos: photosData,
@@ -600,10 +603,10 @@ export default function EstimateSummaryScreen() {
           />
 
           <TextInput
-            label="Vehicle Model"
-            value={carModel}
-            onChangeText={setCarModel}
-            placeholder="Toyota Camry 2020"
+            label="License Plate"
+            value={plate}
+            onChangeText={setPlate}
+            placeholder="AA-123-BB"
             style={styles.phoneInput}
             left={<TextInput.Icon icon="car" />}
           />

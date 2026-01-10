@@ -288,6 +288,7 @@ export const deleteInspection = async (inspectionId) => {
  * @param {string} params.customerName - Customer name
  * @param {string} params.customerPhone - Customer phone number
  * @param {string} params.carModel - Car model
+ * @param {string} params.plate - License plate number
  * @param {number} params.totalPrice - Total estimate price
  * @returns {Promise<string>} Inspection document ID
  */
@@ -298,6 +299,7 @@ export const saveInspectionWithImages = async ({
   customerName,
   customerPhone,
   carModel,
+  plate,
   totalPrice,
 }) => {
   try {
@@ -340,6 +342,7 @@ export const saveInspectionWithImages = async ({
       customerName,
       customerPhone,
       carModel,
+      plate: plate || carModel,
       totalPrice,
       parts,
       photos: uploadedImages,

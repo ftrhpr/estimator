@@ -53,6 +53,7 @@ export default function CaseDetailScreen() {
   const [editedCustomerName, setEditedCustomerName] = useState('');
   const [editedCustomerPhone, setEditedCustomerPhone] = useState('');
   const [editedCarModel, setEditedCarModel] = useState('');
+  const [editedPlate, setEditedPlate] = useState('');
   const [showAddServiceModal, setShowAddServiceModal] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
@@ -65,6 +66,11 @@ export default function CaseDetailScreen() {
   const [actualImageSize, setActualImageSize] = useState({ width: 0, height: 0 });
   const [cpanelInvoiceId, setCpanelInvoiceId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [showEditServiceModal, setShowEditServiceModal] = useState(false);
+  const [editingServiceIndex, setEditingServiceIndex] = useState<number | null>(null);
+  const [editServiceName, setEditServiceName] = useState('');
+  const [editServicePrice, setEditServicePrice] = useState('');
+  const [editServiceCount, setEditServiceCount] = useState('1');
 
   // Animation values
   const scale = useSharedValue(1);
@@ -150,6 +156,7 @@ export default function CaseDetailScreen() {
         customerName: cpanelData.customerName || caseData.customerName,
         customerPhone: cpanelData.customerPhone || caseData.customerPhone,
         carModel: cpanelData.carModel || caseData.carModel,
+        plate: cpanelData.plate || caseData.plate,
         totalPrice: cpanelData.totalPrice || caseData.totalPrice,
         status: cpanelData.status || caseData.status,
         services: cpanelData.services || caseData.services,
@@ -160,6 +167,7 @@ export default function CaseDetailScreen() {
         customerName: updatedData.customerName,
         customerPhone: updatedData.customerPhone,
         carModel: updatedData.carModel,
+        plate: updatedData.plate,
         totalPrice: updatedData.totalPrice,
         status: updatedData.status,
         services: updatedData.services,
@@ -170,6 +178,7 @@ export default function CaseDetailScreen() {
       setEditedCustomerName(updatedData.customerName || '');
       setEditedCustomerPhone(updatedData.customerPhone || '');
       setEditedCarModel(updatedData.carModel || '');
+      setEditedPlate(updatedData.plate || '');
 
       Alert.alert('✅ Sync Complete', 'Data has been synced from cPanel successfully.');
     } catch (error) {
@@ -196,6 +205,7 @@ export default function CaseDetailScreen() {
         setEditedCustomerName(data.customerName || '');
         setEditedCustomerPhone(data.customerPhone || '');
         setEditedCarModel(data.carModel || '');
+        setEditedPlate(data.plate || data.carModel || '');
         if (data.cpanelInvoiceId) {
           setCpanelInvoiceId(data.cpanelInvoiceId);
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
@@ -217,7 +227,7 @@ export default function CaseDetailScreen() {
 
     const message = `🚗 Invoice #${id.slice(0, 8)}\n\n` +
       `📋 Customer: ${caseData.customerName || 'N/A'}\n` +
-      `🚙 Vehicle: ${caseData.carModel || 'Unknown'}\n` +
+      `🚗 Plate: ${caseData.plate || caseData.carModel || 'N/A'}\n` +
       `💰 Total: ${formatCurrencyGEL(caseData.totalPrice)}\n\n` +
       `Services:\n` +
       (caseData.services || []).map((s: any) => {
@@ -286,6 +296,29 @@ export default function CaseDetailScreen() {
     setEditedServices(updated);
   };
 
+  const handleServiceCountChange = (index: number, newCount: string) => {
+    const updated = [...editedServices];
+    const oldCount = normalizeService(updated[index]).count || 1;
+    const newCountNum = parseInt(newCount) || 1;
+
+    // Calculate price per unit
+    const currentPrice = updated[index].price || 0;
+    const pricePerUnit = currentPrice / oldCount;
+
+    // Adjust price based on new quantity
+    const newPrice = pricePerUnit * newCountNum;
+
+    updated[index] = {
+      ...updated[index],
+      count: newCountNum,
+      price: Math.round(newPrice * 100) / 100 // Round to 2 decimal places
+    };
+
+    setEditedServices(updated);
+
+    console.log(`[Case Detail] Quantity changed: ${oldCount} → ${newCountNum}, Price adjusted: ${currentPrice} → ${newPrice.toFixed(2)}`);
+  };
+
   const handleDeleteService = (index: number) => {
     Alert.alert(
       '🗑️ Delete Service',
@@ -304,6 +337,76 @@ export default function CaseDetailScreen() {
     );
   };
 
+  const handleOpenEditService = (index: number) => {
+    const service = caseData.services[index];
+    const normalized = normalizeService(service);
+
+    setEditingServiceIndex(index);
+    setEditServiceName(normalized.serviceName);
+    setEditServicePrice(normalized.price.toString());
+    setEditServiceCount(normalized.count.toString());
+    setShowEditServiceModal(true);
+  };
+
+  const handleEditServiceCountChange = (newCount: string) => {
+    const oldCount = parseInt(editServiceCount) || 1;
+    const newCountNum = parseInt(newCount) || 1;
+
+    // Calculate price per unit based on current total price
+    const currentTotalPrice = parseFloat(editServicePrice) || 0;
+    const pricePerUnit = currentTotalPrice / oldCount;
+
+    // Adjust total price based on new quantity
+    const newTotalPrice = pricePerUnit * newCountNum;
+    const roundedPrice = Math.round(newTotalPrice * 100) / 100;
+
+    setEditServiceCount(newCount);
+    setEditServicePrice(roundedPrice.toString());
+
+    console.log(`[Edit Modal] Quantity changed: ${oldCount} → ${newCountNum}, Price adjusted: ${currentTotalPrice} → ${roundedPrice.toFixed(2)}`);
+  };
+
+  const handleSaveEditedService = async () => {
+    if (!editServiceName.trim() || !editServicePrice.trim()) {
+      Alert.alert('⚠️ Validation Error', 'Service name and price are required');
+      return;
+    }
+
+    if (editingServiceIndex === null) return;
+
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      const updatedServices = [...caseData.services];
+      updatedServices[editingServiceIndex] = {
+        ...updatedServices[editingServiceIndex],
+        serviceName: editServiceName,
+        serviceNameKa: getServiceNameGeorgian(editServiceName),
+        price: parseFloat(editServicePrice) || 0,
+        count: parseInt(editServiceCount) || 1,
+      };
+
+      const newTotal = updatedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
+
+      await updateInspection(id as string, {
+        services: updatedServices,
+        totalPrice: newTotal,
+      }, cpanelId || undefined);
+
+      setCaseData({ ...caseData, services: updatedServices, totalPrice: newTotal });
+      setShowEditServiceModal(false);
+      setEditingServiceIndex(null);
+      setEditServiceName('');
+      setEditServicePrice('');
+      setEditServiceCount('1');
+      Alert.alert('✅ Success', 'Service updated successfully');
+    } catch (error) {
+      console.error('Error updating service:', error);
+      Alert.alert('❌ Error', 'Failed to update service');
+    }
+  };
+
   const handleImagePress = (photo: any) => {
     setSelectedImage(photo);
     setShowImageModal(true);
@@ -314,6 +417,7 @@ export default function CaseDetailScreen() {
       setEditedCustomerName(caseData.customerName || '');
       setEditedCustomerPhone(caseData.customerPhone || '');
       setEditedCarModel(caseData.carModel || '');
+      setEditedPlate(caseData.plate || '');
     }
     setEditCustomerMode(!editCustomerMode);
   };
@@ -359,14 +463,16 @@ export default function CaseDetailScreen() {
       await updateInspection(id as string, {
         customerName: editedCustomerName,
         customerPhone: editedCustomerPhone,
-        carModel: editedCarModel
+        carModel: editedCarModel,
+        plate: editedPlate
       }, cpanelId || undefined);
 
       setCaseData({
         ...caseData,
         customerName: editedCustomerName,
         customerPhone: editedCustomerPhone,
-        carModel: editedCarModel
+        carModel: editedCarModel,
+        plate: editedPlate
       });
       setEditCustomerMode(false);
       Alert.alert('✅ Success', 'Customer information updated successfully');
@@ -395,10 +501,36 @@ export default function CaseDetailScreen() {
       };
 
       // Check if service already exists and combine if it does
-      const existingServices = [...(caseData.services || [])];
+      // Use editedServices if in edit mode, otherwise use caseData.services
+      const currentServices = editMode ? editedServices : (caseData.services || []);
+      const existingServices = [...currentServices];
+
+      // Find existing service by checking both English and Georgian names
+      console.log('[Case Detail] Checking for duplicate service:', {
+        newService: { en: newService.serviceName, ka: newService.serviceNameKa },
+        existingCount: existingServices.length
+      });
+
       const existingServiceIndex = existingServices.findIndex(s => {
         const normalized = normalizeService(s);
-        return normalized.serviceName.toLowerCase() === newService.serviceName.toLowerCase();
+        const existingNameEn = normalized.serviceName.toLowerCase();
+        const existingNameKa = (s.serviceNameKa || '').toLowerCase();
+        const newNameEn = newService.serviceName.toLowerCase();
+        const newNameKa = (newService.serviceNameKa || '').toLowerCase();
+
+        const matches = existingNameEn === newNameEn ||
+                       (existingNameKa && existingNameKa === newNameKa) ||
+                       (existingNameEn === newNameKa) ||
+                       (existingNameKa === newNameEn);
+
+        if (matches) {
+          console.log('[Case Detail] Found matching service:', {
+            existing: { en: existingNameEn, ka: existingNameKa },
+            new: { en: newNameEn, ka: newNameKa }
+          });
+        }
+
+        return matches;
       });
 
       let updatedServices;
@@ -414,10 +546,11 @@ export default function CaseDetailScreen() {
           price: normalized.price + newService.price,
         };
 
-        console.log(`[Case Detail] Combined duplicate service: ${newService.serviceName} (${normalized.count} + ${newService.count} = ${normalized.count + newService.count})`);
+        console.log(`[Case Detail] ✅ Combined duplicate service: ${newService.serviceName} (Count: ${normalized.count} + ${newService.count} = ${normalized.count + newService.count}, Price: ${normalized.price} + ${newService.price} = ${normalized.price + newService.price})`);
       } else {
         // New service - add to list
         updatedServices = [...existingServices, newService];
+        console.log('[Case Detail] ➕ Added new service:', newService.serviceName);
       }
 
       const newTotal = updatedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
@@ -471,7 +604,7 @@ export default function CaseDetailScreen() {
           </TouchableOpacity>
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {caseData.carModel || 'Unknown'}
+              {caseData.plate || caseData.carModel || 'No Plate'}
             </Text>
             <Text style={styles.headerSubtitle}>#{id.toString().slice(0, 8).toUpperCase()}</Text>
           </View>
@@ -561,13 +694,14 @@ export default function CaseDetailScreen() {
                     left={<TextInput.Icon icon="phone" />}
                   />
                   <TextInput
-                    label="ავტომობილი"
-                    value={editedCarModel}
-                    onChangeText={setEditedCarModel}
+                    label="სახელმწიფო ნომერი *"
+                    value={editedPlate}
+                    onChangeText={setEditedPlate}
                     mode="outlined"
                     style={styles.modernInput}
                     outlineStyle={styles.inputOutline}
                     left={<TextInput.Icon icon="car" />}
+                    placeholder="AA-123-BB"
                   />
                   <View style={styles.modernEditActions}>
                     <Button
@@ -629,8 +763,8 @@ export default function CaseDetailScreen() {
                       <MaterialCommunityIcons name="car-outline" size={22} color={COLORS.accent} />
                     </View>
                     <View style={styles.infoTextContainer}>
-                      <Text style={styles.infoLabel}>ავტომობილი</Text>
-                      <Text style={styles.infoValue}>{caseData.carModel || 'Unknown'}</Text>
+                      <Text style={styles.infoLabel}>სახელმწიფო ნომერი</Text>
+                      <Text style={styles.infoValue}>{caseData.plate || caseData.carModel || 'N/A'}</Text>
                     </View>
                   </View>
                 </View>
@@ -675,38 +809,67 @@ export default function CaseDetailScreen() {
                     <View key={index}>
                       {editMode ? (
                         <View style={styles.editServiceContainer}>
-                          <View style={styles.editServiceLeft}>
+                          <View style={styles.editServiceHeader}>
                             <View style={styles.serviceIconSmall}>
                               <MaterialCommunityIcons name="tools" size={16} color={COLORS.primary} />
                             </View>
-                            <View style={styles.editServiceInfo}>
-                              <Text style={styles.modernServiceName}>{getServiceNameGeorgian(normalized.serviceName)}</Text>
-                              {normalized.count > 1 && (
-                                <Text style={styles.modernServiceCount}>რაოდენობა: {normalized.count}</Text>
-                              )}
-                            </View>
-                          </View>
-                          <View style={styles.editServiceRight}>
-                            <TextInput
-                              mode="outlined"
-                              value={editedServices[index].price?.toString() || '0'}
-                              onChangeText={(text) => handleServicePriceChange(index, text)}
-                              keyboardType="numeric"
-                              style={styles.modernPriceInput}
-                              outlineStyle={styles.priceInputOutline}
-                              dense
-                              left={<TextInput.Affix text="₾" />}
-                            />
+                            <Text style={styles.editServiceName} numberOfLines={2}>
+                              {getServiceNameGeorgian(normalized.serviceName)}
+                            </Text>
                             <TouchableOpacity
                               onPress={() => handleDeleteService(index)}
-                              style={styles.deleteButton}
+                              style={styles.deleteButtonCompact}
                             >
-                              <MaterialCommunityIcons name="delete" size={20} color={COLORS.error} />
+                              <MaterialCommunityIcons name="close" size={18} color={COLORS.error} />
                             </TouchableOpacity>
+                          </View>
+                          <View style={styles.editServiceControls}>
+                            <View style={styles.quantityControlGroup}>
+                              <Text style={styles.controlLabel}>რაოდენობა</Text>
+                              <View style={styles.quantityControl}>
+                                <TouchableOpacity
+                                  onPress={() => handleServiceCountChange(index, Math.max(1, normalized.count - 1).toString())}
+                                  style={[styles.quantityButton, normalized.count <= 1 && styles.quantityButtonDisabled]}
+                                  disabled={normalized.count <= 1}
+                                >
+                                  <MaterialCommunityIcons
+                                    name="minus"
+                                    size={18}
+                                    color={normalized.count <= 1 ? COLORS.text.disabled : COLORS.primary}
+                                  />
+                                </TouchableOpacity>
+                                <View style={styles.quantityDisplay}>
+                                  <Text style={styles.quantityText}>{normalized.count}</Text>
+                                </View>
+                                <TouchableOpacity
+                                  onPress={() => handleServiceCountChange(index, (normalized.count + 1).toString())}
+                                  style={styles.quantityButton}
+                                >
+                                  <MaterialCommunityIcons name="plus" size={18} color={COLORS.primary} />
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                            <View style={styles.priceControlGroup}>
+                              <Text style={styles.controlLabel}>ფასი</Text>
+                              <TextInput
+                                mode="outlined"
+                                value={editedServices[index].price?.toString() || '0'}
+                                onChangeText={(text) => handleServicePriceChange(index, text)}
+                                keyboardType="numeric"
+                                style={styles.priceInputEdit}
+                                outlineStyle={styles.priceInputEditOutline}
+                                dense
+                                left={<TextInput.Affix text="₾" />}
+                              />
+                            </View>
                           </View>
                         </View>
                       ) : (
-                        <View style={styles.modernServiceRow}>
+                        <TouchableOpacity
+                          style={styles.modernServiceRow}
+                          onPress={() => handleOpenEditService(index)}
+                          activeOpacity={0.7}
+                        >
                           <View style={styles.serviceLeft}>
                             <View style={styles.serviceIconSmall}>
                               <MaterialCommunityIcons name="tools" size={16} color={COLORS.primary} />
@@ -714,18 +877,14 @@ export default function CaseDetailScreen() {
                             <View style={styles.serviceTextContainer}>
                               <Text style={styles.modernServiceName}>{getServiceNameGeorgian(normalized.serviceName)}</Text>
                               {normalized.count > 1 && (
-                                <Chip
-                                  compact
-                                  style={styles.countChip}
-                                  textStyle={styles.countChipText}
-                                >
-                                  x{normalized.count}
-                                </Chip>
+                                <View style={styles.countBadge}>
+                                  <Text style={styles.countBadgeText}>x{normalized.count}</Text>
+                                </View>
                               )}
                             </View>
                           </View>
                           <Text style={styles.modernServicePrice}>{formatCurrencyGEL(normalized.price)}</Text>
-                        </View>
+                        </TouchableOpacity>
                       )}
                       {index < (editMode ? editedServices : caseData.services).length - 1 &&
                         <Divider style={styles.modernDivider} />
@@ -943,6 +1102,141 @@ export default function CaseDetailScreen() {
               disabled={!newServiceName.trim() || !newServicePrice.trim()}
             >
               დამატება
+            </Button>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Edit Service Modal - Enhanced */}
+      <Portal>
+        <Modal
+          visible={showEditServiceModal}
+          onDismiss={() => setShowEditServiceModal(false)}
+          contentContainerStyle={styles.editServiceModalContainer}
+        >
+          <View style={styles.editModalHeader}>
+            <View style={styles.editModalHeaderTop}>
+              <View style={styles.modalHeaderLeft}>
+                <View style={[styles.iconCircleLarge, { backgroundColor: COLORS.primary + '10' }]}>
+                  <MaterialCommunityIcons name="pencil" size={24} color={COLORS.primary} />
+                </View>
+                <View>
+                  <Text style={styles.modalTitleLarge}>სერვისის რედაქტირება</Text>
+                  <Text style={styles.modalSubtitle}>შეცვალეთ სერვისის პარამეტრები</Text>
+                </View>
+              </View>
+              <IconButton
+                icon="close"
+                size={24}
+                onPress={() => setShowEditServiceModal(false)}
+                iconColor={COLORS.text.secondary}
+                style={styles.closeButton}
+              />
+            </View>
+          </View>
+
+          <View style={styles.editModalContent}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputGroupLabel}>სერვისის დასახელება</Text>
+              <TextInput
+                value={editServiceName}
+                onChangeText={setEditServiceName}
+                mode="outlined"
+                placeholder="შეიყვანეთ სერვისის სახელი"
+                style={styles.enhancedInput}
+                outlineStyle={styles.enhancedInputOutline}
+                activeOutlineColor={COLORS.primary}
+                textColor={COLORS.text.primary}
+              />
+            </View>
+
+            <View style={styles.inputRow}>
+              <View style={[styles.inputGroup, { flex: 1.5, marginRight: 12 }]}>
+                <Text style={styles.inputGroupLabel}>ფასი (₾)</Text>
+                <TextInput
+                  value={editServicePrice}
+                  onChangeText={setEditServicePrice}
+                  mode="outlined"
+                  keyboardType="numeric"
+                  placeholder="0"
+                  style={styles.enhancedInput}
+                  outlineStyle={styles.enhancedInputOutline}
+                  activeOutlineColor={COLORS.primary}
+                  left={<TextInput.Icon icon="cash" color={COLORS.text.secondary} />}
+                />
+              </View>
+              <View style={[styles.inputGroup, { flex: 1 }]}>
+                <Text style={styles.inputGroupLabel}>რაოდენობა</Text>
+                <View style={styles.modalQuantityControl}>
+                  <TouchableOpacity
+                    onPress={() => handleEditServiceCountChange(Math.max(1, parseInt(editServiceCount) - 1).toString())}
+                    style={[styles.modalQuantityButton, parseInt(editServiceCount) <= 1 && styles.quantityButtonDisabled]}
+                    disabled={parseInt(editServiceCount) <= 1}
+                  >
+                    <MaterialCommunityIcons
+                      name="minus"
+                      size={20}
+                      color={parseInt(editServiceCount) <= 1 ? COLORS.text.disabled : COLORS.primary}
+                    />
+                  </TouchableOpacity>
+                  <View style={styles.modalQuantityDisplay}>
+                    <Text style={styles.modalQuantityText}>{editServiceCount}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleEditServiceCountChange((parseInt(editServiceCount) + 1).toString())}
+                    style={styles.modalQuantityButton}
+                  >
+                    <MaterialCommunityIcons name="plus" size={20} color={COLORS.primary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* Total Preview */}
+            {editServicePrice && editServiceCount && (
+              <View style={styles.totalPreviewCard}>
+                <View style={styles.totalPreviewRow}>
+                  <Text style={styles.totalPreviewLabel}>სულ:</Text>
+                  <Text style={styles.totalPreviewAmount}>
+                    {formatCurrencyGEL(parseFloat(editServicePrice) || 0)}
+                  </Text>
+                </View>
+                {parseInt(editServiceCount) > 1 && (
+                  <Text style={styles.totalPreviewSubtext}>
+                    {editServiceCount} × {formatCurrencyGEL((parseFloat(editServicePrice) || 0) / (parseInt(editServiceCount) || 1))}
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.editModalActions}>
+            <Button
+              mode="outlined"
+              onPress={() => {
+                setShowEditServiceModal(false);
+                setEditingServiceIndex(null);
+                setEditServiceName('');
+                setEditServicePrice('');
+                setEditServiceCount('1');
+              }}
+              style={styles.cancelButton}
+              labelStyle={styles.cancelButtonLabel}
+              contentStyle={styles.buttonContent}
+            >
+              გაუქმება
+            </Button>
+            <Button
+              mode="contained"
+              onPress={handleSaveEditedService}
+              style={styles.saveButton}
+              labelStyle={styles.saveButtonLabel}
+              contentStyle={styles.buttonContent}
+              buttonColor={COLORS.primary}
+              disabled={!editServiceName.trim() || !editServicePrice.trim()}
+              icon="check"
+            >
+              შენახვა
             </Button>
           </View>
         </Modal>
@@ -1426,6 +1720,20 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
   },
+  countBadge: {
+    backgroundColor: COLORS.primary + '15',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    minWidth: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countBadgeText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
 
   // Edit Mode
   editForm: {
@@ -1451,10 +1759,52 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   editServiceContainer: {
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    marginVertical: 6,
+    borderWidth: 1,
+    borderColor: COLORS.outline,
+  },
+  editServiceHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  editServiceName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginLeft: 8,
+  },
+  deleteButtonCompact: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.error + '10',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  editServiceControls: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  quantityControlGroup: {
+    flex: 1,
+  },
+  priceControlGroup: {
+    flex: 1,
+  },
+  controlLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   editServiceLeft: {
     flexDirection: 'row',
@@ -1468,6 +1818,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  quantityControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.outline,
+    overflow: 'hidden',
+  },
+  quantityButton: {
+    width: 36,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  quantityButtonDisabled: {
+    opacity: 0.4,
+  },
+  quantityDisplay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  quantityText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  priceInputEdit: {
+    backgroundColor: '#fff',
+    fontSize: 16,
+  },
+  priceInputEditOutline: {
+    borderRadius: 10,
+    borderColor: COLORS.outline,
+  },
+  quantityInput: {
+    width: 50,
+    backgroundColor: '#fff',
+    textAlign: 'center',
+  },
+  quantityInputOutline: {
+    borderRadius: 6,
   },
   modernPriceInput: {
     width: 100,
@@ -1647,6 +2043,171 @@ const styles = StyleSheet.create({
   modernDivider: {
     backgroundColor: COLORS.outline,
     marginVertical: 16,
+  },
+
+  // Edit Service Modal - Enhanced Styles
+  editServiceModalContainer: {
+    margin: 0,
+    backgroundColor: '#fff',
+    borderRadius: 28,
+    marginHorizontal: 16,
+    maxHeight: '75%',
+    overflow: 'hidden',
+  },
+  editModalHeader: {
+    backgroundColor: COLORS.background,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  editModalHeaderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  iconCircleLarge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  modalTitleLarge: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
+  },
+  closeButton: {
+    margin: 0,
+  },
+  editModalContent: {
+    padding: 20,
+    gap: 18,
+  },
+  inputGroup: {
+    gap: 8,
+  },
+  inputGroupLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginLeft: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  enhancedInput: {
+    backgroundColor: '#fff',
+    fontSize: 16,
+  },
+  enhancedInputOutline: {
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: COLORS.outline,
+  },
+  totalPreviewCard: {
+    backgroundColor: COLORS.primary + '08',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.primary + '20',
+    marginTop: 4,
+  },
+  totalPreviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  totalPreviewLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  totalPreviewAmount: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  totalPreviewSubtext: {
+    fontSize: 12,
+    color: COLORS.text.tertiary,
+    marginTop: 6,
+    textAlign: 'right',
+  },
+  editModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  cancelButton: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: COLORS.outline,
+  },
+  cancelButtonLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  saveButton: {
+    flex: 1,
+    borderRadius: 14,
+    elevation: 0,
+  },
+  saveButtonLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  buttonContent: {
+    paddingVertical: 8,
+  },
+  modalQuantityControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: COLORS.outline,
+    overflow: 'hidden',
+    height: 56,
+  },
+  modalQuantityButton: {
+    width: 48,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+  },
+  modalQuantityDisplay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    minWidth: 50,
+  },
+  modalQuantityText: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: 0.5,
   },
 
   // Image Modal (keep existing styles)

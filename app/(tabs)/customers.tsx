@@ -50,12 +50,12 @@ export default function CustomersScreen() {
       inspections.forEach((inspection: any) => {
         const phone = inspection.customerPhone || '';
         const name = inspection.customerName || 'Unknown';
-        const vehicle = inspection.carModel || '';
+        const vehicle = inspection.plate || inspection.carModel || '';
         const price = inspection.totalPrice || 0;
         const date = inspection.createdAt || new Date().toISOString();
-        
+
         if (!phone) return; // Skip if no phone number
-        
+
         if (customerMap.has(phone)) {
           const existing = customerMap.get(phone)!;
           existing.totalInvoices += 1;
