@@ -269,6 +269,39 @@ export const getModelById = async (modelId: string): Promise<CarModelDoc | null>
 };
 
 /**
+ * Add a custom model for a specific make
+ * Used when user enters a model that doesn't exist in the database
+ */
+export const addCustomModel = async (makeId: string, makeName: string, modelName: string): Promise<CarModelDoc> => {
+  try {
+    const now = new Date();
+    // Generate a unique ID for the custom model
+    const customId = `custom_${makeId}_${modelName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}`;
+    
+    const modelDoc: CarModelDoc = {
+      id: customId,
+      name: modelName.trim(),
+      makeId: makeId,
+      makeName: makeName,
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    const modelRef = doc(db, COLLECTIONS.CAR_MODELS, customId);
+    await setDoc(modelRef, {
+      ...modelDoc,
+      isCustom: true, // Flag to identify custom entries
+    });
+    
+    console.log(`[CarDB] Added custom model: ${modelName} for make ${makeName}`);
+    return modelDoc;
+  } catch (error) {
+    console.error('[CarDB] Error adding custom model:', error);
+    throw error;
+  }
+};
+
+/**
  * Initialize car data - call on app startup
  * This checks if data needs to be synced and syncs if necessary
  */
@@ -296,6 +329,7 @@ export default {
   searchMakes,
   getMakeById,
   getModelById,
+  addCustomModel,
   needsSync,
   getSyncMeta,
 };

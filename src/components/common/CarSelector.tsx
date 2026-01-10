@@ -11,6 +11,7 @@ import {
     FlatList,
     Modal,
     StyleSheet,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -24,6 +25,7 @@ import {
 
 import { COLORS } from '../../config/constants';
 import {
+    addCustomModel,
     CarMakeDoc,
     CarModelDoc,
     getAllMakes,
@@ -59,6 +61,8 @@ export const CarSelector: React.FC<CarSelectorProps> = ({
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [customModelName, setCustomModelName] = useState('');
+  const [savingCustom, setSavingCustom] = useState(false);
   
   // Data
   const [makes, setMakes] = useState<CarMakeDoc[]>([]);
@@ -146,6 +150,36 @@ export const CarSelector: React.FC<CarSelectorProps> = ({
   const handleClear = useCallback(() => {
     onChange(null);
   }, [onChange]);
+  
+  const handleAddCustomModel = useCallback(async () => {
+    if (!selectedMake || !customModelName.trim()) return;
+    
+    try {
+      setSavingCustom(true);
+      
+      // Save custom model to Firebase
+      const newModel = await addCustomModel(
+        selectedMake.id,
+        selectedMake.name,
+        customModelName.trim()
+      );
+      
+      // Select this model
+      onChange({
+        makeId: selectedMake.id,
+        makeName: selectedMake.name,
+        modelId: newModel.id,
+        modelName: newModel.name,
+      });
+      
+      setCustomModelName('');
+      closeModal();
+    } catch (error) {
+      console.error('Error adding custom model:', error);
+    } finally {
+      setSavingCustom(false);
+    }
+  }, [selectedMake, customModelName, onChange, closeModal]);
   
   const handleBack = useCallback(() => {
     setStep('make');
@@ -268,6 +302,40 @@ export const CarSelector: React.FC<CarSelectorProps> = ({
           
           <Divider />
           
+          {/* Custom Model Input - Only shown in model step */}
+          {step === 'model' && (
+            <View style={styles.customModelContainer}>
+              <Text style={styles.customModelLabel}>
+                ვერ იპოვეთ მოდელი? ჩაწერეთ ხელით:
+              </Text>
+              <View style={styles.customModelInputRow}>
+                <TextInput
+                  style={styles.customModelInput}
+                  placeholder="მაგ: Camry, Civic, X5..."
+                  placeholderTextColor="#999"
+                  value={customModelName}
+                  onChangeText={setCustomModelName}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.customModelButton,
+                    (!customModelName.trim() || savingCustom) && styles.customModelButtonDisabled
+                  ]}
+                  onPress={handleAddCustomModel}
+                  disabled={!customModelName.trim() || savingCustom}
+                >
+                  {savingCustom ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <MaterialCommunityIcons name="plus" size={24} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          
+          <Divider />
+          
           {/* List */}
           {loading ? (
             <View style={styles.loadingContainer}>
@@ -370,6 +438,44 @@ const styles = StyleSheet.create({
   syncHint: {
     fontSize: 13,
     color: '#999',
+  },
+  
+  customModelContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f8f9fa',
+  },
+  customModelLabel: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 8,
+  },
+  customModelInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  customModelInput: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#333',
+  },
+  customModelButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  customModelButtonDisabled: {
+    backgroundColor: '#ccc',
   },
   
   listContent: {
