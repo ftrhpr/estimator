@@ -61,7 +61,10 @@ export default function EstimateSummaryScreen() {
   });
   const [phoneNumber, setPhoneNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [carMake, setCarMake] = useState('');
   const [carModel, setCarModel] = useState('');
+  const [carMakeId, setCarMakeId] = useState('');
+  const [carModelId, setCarModelId] = useState('');
   const [plate, setPlate] = useState('');
   const [searchingCustomer, setSearchingCustomer] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
@@ -146,13 +149,17 @@ export default function EstimateSummaryScreen() {
         
         const recentCustomer = sortedInspections[0];
         setCustomerName(recentCustomer.customerName || '');
+        setCarMake(recentCustomer.carMake || '');
         setCarModel(recentCustomer.carModel || '');
-        setPlate(recentCustomer.plate || recentCustomer.carModel || '');
+        setCarMakeId(recentCustomer.carMakeId || '');
+        setCarModelId(recentCustomer.carModelId || '');
+        setPlate(recentCustomer.plate || '');
 
         // Show a notification that customer was found
+        const carInfo = [recentCustomer.carMake, recentCustomer.carModel].filter(Boolean).join(' ');
         Alert.alert(
           'Customer Found',
-          `Welcome back ${recentCustomer.customerName || 'Customer'}!\nPlate: ${recentCustomer.plate || recentCustomer.carModel || 'Not specified'}`,
+          `Welcome back ${recentCustomer.customerName || 'Customer'}!\n${carInfo ? `Car: ${carInfo}\n` : ''}Plate: ${recentCustomer.plate || 'Not specified'}`,
           [{ text: 'OK' }]
         );
         
@@ -161,7 +168,10 @@ export default function EstimateSummaryScreen() {
       
       // New customer
       setCustomerName('');
+      setCarMake('');
       setCarModel('');
+      setCarMakeId('');
+      setCarModelId('');
       return false;
     } catch (error) {
       console.error('Error searching customer:', error);
@@ -339,8 +349,11 @@ export default function EstimateSummaryScreen() {
       const invoiceData = {
         customerName: customerInfo.name || customerName || 'N/A',
         customerPhone: customerInfo.phone,
-        carModel: carModel || 'Unknown',
-        plate: plate || carModel || 'N/A',
+        carMake: carMake || '',
+        carModel: carModel || '',
+        carMakeId: carMakeId || '',
+        carModelId: carModelId || '',
+        plate: plate || 'N/A',
         totalPrice: getTotalPrice(),
         services: allServices,
         photos: photosData,
@@ -617,6 +630,25 @@ export default function EstimateSummaryScreen() {
             style={styles.phoneInput}
             left={<TextInput.Icon icon="car" />}
           />
+
+          {/* Car Make & Model */}
+          <Text style={styles.sectionLabel}>მარკა და მოდელი</Text>
+          <View style={styles.carMakeModelRow}>
+            <TextInput
+              label="მარკა"
+              value={carMake}
+              onChangeText={setCarMake}
+              placeholder="Toyota"
+              style={[styles.phoneInput, styles.halfInput]}
+            />
+            <TextInput
+              label="მოდელი"
+              value={carModel}
+              onChangeText={setCarModel}
+              placeholder="Camry"
+              style={[styles.phoneInput, styles.halfInput]}
+            />
+          </View>
 
           <View style={styles.modalActions}>
             <Button
@@ -930,5 +962,19 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     textAlign: 'center',
     marginVertical: SPACING.lg,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  carMakeModelRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  halfInput: {
+    flex: 1,
   },
 });

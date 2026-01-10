@@ -1,35 +1,32 @@
-import React, { useState } from 'react';
-import { 
-  View, 
-  StyleSheet, 
-  ScrollView, 
-  KeyboardAvoidingView, 
-  Platform, 
-  Alert,
-  StatusBar,
-  Dimensions,
-  TouchableOpacity 
-} from 'react-native';
-import { 
-  Appbar, 
-  TextInput, 
-  Button, 
-  Text, 
-  Card, 
-  Portal, 
-  Modal, 
-  Divider, 
-  IconButton,
-  ProgressBar
-} from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { CustomerIntakeFormData, IntakeResult, Vehicle } from '../../types';
+import React, { useState } from 'react';
+import {
+    Alert,
+    Dimensions,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import {
+    Button,
+    Modal,
+    Portal,
+    ProgressBar,
+    Text,
+    TextInput
+} from 'react-native-paper';
+import { CarSelector, SelectedCar } from '../../components/common/CarSelector';
+import { VINScanner } from '../../components/common/VINScanner';
+import { BORDER_RADIUS, COLORS, SHADOWS, SPACING, TYPOGRAPHY } from '../../config/constants';
 import { CustomerService } from '../../services/customerService';
 import { VehicleService } from '../../services/vehicleService';
-import { VINScanner } from '../../components/common/VINScanner';
-import { validatePhone, formatPhone } from '../../utils/helpers';
-import { COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS, SHADOWS } from '../../config/constants';
+import { CustomerIntakeFormData, IntakeResult, Vehicle } from '../../types';
+import { formatPhone, validatePhone } from '../../utils/helpers';
 
 const { width } = Dimensions.get('window');
 
@@ -57,6 +54,7 @@ export const CustomerIntakeScreen: React.FC<CustomerIntakeScreenProps> = ({
   const [errors, setErrors] = useState<Partial<CustomerIntakeFormData>>({});
   const [loading, setLoading] = useState(false);
   const [showVINScanner, setShowVINScanner] = useState(false);
+  const [selectedCar, setSelectedCar] = useState<SelectedCar | null>(null);
 
   const currentYear = new Date().getFullYear();
 
@@ -289,6 +287,18 @@ export const CustomerIntakeScreen: React.FC<CustomerIntakeScreenProps> = ({
     </View>
   );
 
+  // Handle car selection from CarSelector
+  const handleCarSelection = (car: SelectedCar | null) => {
+    setSelectedCar(car);
+    if (car) {
+      updateField('vehicleMake', car.makeName);
+      updateField('vehicleModel', car.modelName);
+    } else {
+      updateField('vehicleMake', '');
+      updateField('vehicleModel', '');
+    }
+  };
+
   const renderVehicleStep = () => (
     <View style={styles.stepContent}>
       <View style={styles.stepHeader}>
@@ -296,10 +306,29 @@ export const CustomerIntakeScreen: React.FC<CustomerIntakeScreenProps> = ({
         <Text style={styles.stepTitle}>Vehicle Information</Text>
       </View>
       
+      {/* Car Make & Model Selector */}
+      <Text style={styles.inputLabel}>მარკა და მოდელი *</Text>
+      <CarSelector
+        value={selectedCar}
+        onChange={handleCarSelection}
+        placeholder="აირჩიეთ მარკა და მოდელი"
+      />
+      {(errors.vehicleMake || errors.vehicleModel) && (
+        <Text style={styles.errorText}>
+          {errors.vehicleMake || errors.vehicleModel}
+        </Text>
+      )}
+
+      {/* Manual Override Option */}
+      <Text style={styles.orDivider}>ან ხელით შეიყვანეთ</Text>
+      
       <TextInput
-        label="Vehicle Make *"
+        label="Vehicle Make"
         value={formData.vehicleMake}
-        onChangeText={(value) => updateField('vehicleMake', value)}
+        onChangeText={(value) => {
+          updateField('vehicleMake', value);
+          if (selectedCar) setSelectedCar(null);
+        }}
         error={!!errors.vehicleMake}
         style={styles.input}
         mode="outlined"
@@ -308,12 +337,14 @@ export const CustomerIntakeScreen: React.FC<CustomerIntakeScreenProps> = ({
         activeOutlineColor={COLORS.primary}
         left={<TextInput.Icon icon="car" color={COLORS.text.tertiary} />}
       />
-      {errors.vehicleMake && <Text style={styles.errorText}>{errors.vehicleMake}</Text>}
 
       <TextInput
-        label="Vehicle Model *"
+        label="Vehicle Model"
         value={formData.vehicleModel}
-        onChangeText={(value) => updateField('vehicleModel', value)}
+        onChangeText={(value) => {
+          updateField('vehicleModel', value);
+          if (selectedCar) setSelectedCar(null);
+        }}
         error={!!errors.vehicleModel}
         style={styles.input}
         mode="outlined"
@@ -322,7 +353,6 @@ export const CustomerIntakeScreen: React.FC<CustomerIntakeScreenProps> = ({
         activeOutlineColor={COLORS.primary}
         left={<TextInput.Icon icon="car-sports" color={COLORS.text.tertiary} />}
       />
-      {errors.vehicleModel && <Text style={styles.errorText}>{errors.vehicleModel}</Text>}
 
       <TextInput
         label="Vehicle Year *"
@@ -591,6 +621,18 @@ const styles = StyleSheet.create({
   input: {
     marginBottom: SPACING.md,
     backgroundColor: COLORS.surface,
+  },
+  inputLabel: {
+    fontSize: TYPOGRAPHY.fontSize.sm,
+    fontWeight: '500',
+    color: COLORS.text.secondary,
+    marginBottom: SPACING.sm,
+  },
+  orDivider: {
+    fontSize: TYPOGRAPHY.fontSize.sm,
+    color: COLORS.text.tertiary,
+    textAlign: 'center',
+    marginVertical: SPACING.md,
   },
   errorText: {
     color: COLORS.error,

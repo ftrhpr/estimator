@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Alert,
     Animated,
@@ -18,7 +18,6 @@ import {
     ActivityIndicator,
     Button,
     Card,
-    Chip,
     Divider,
     IconButton,
     Portal,
@@ -28,10 +27,7 @@ import {
 } from 'react-native-paper';
 import Reanimated, {
     useSharedValue,
-    withSpring,
-    withTiming,
-    useAnimatedStyle,
-    interpolate
+    withSpring
 } from 'react-native-reanimated';
 
 import { COLORS } from '../../src/config/constants';
@@ -52,8 +48,12 @@ export default function CaseDetailScreen() {
   const [editCustomerMode, setEditCustomerMode] = useState(false);
   const [editedCustomerName, setEditedCustomerName] = useState('');
   const [editedCustomerPhone, setEditedCustomerPhone] = useState('');
+  const [editedCarMake, setEditedCarMake] = useState('');
   const [editedCarModel, setEditedCarModel] = useState('');
+  const [editedCarMakeId, setEditedCarMakeId] = useState('');
+  const [editedCarModelId, setEditedCarModelId] = useState('');
   const [editedPlate, setEditedPlate] = useState('');
+  const [showCarSelector, setShowCarSelector] = useState(false);
   const [showAddServiceModal, setShowAddServiceModal] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
@@ -206,8 +206,11 @@ export default function CaseDetailScreen() {
         setEditedServices(data.services || []);
         setEditedCustomerName(data.customerName || '');
         setEditedCustomerPhone(data.customerPhone || '');
+        setEditedCarMake(data.carMake || '');
         setEditedCarModel(data.carModel || '');
-        setEditedPlate(data.plate || data.carModel || '');
+        setEditedCarMakeId(data.carMakeId || '');
+        setEditedCarModelId(data.carModelId || '');
+        setEditedPlate(data.plate || '');
         if (data.cpanelInvoiceId) {
           setCpanelInvoiceId(data.cpanelInvoiceId);
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
@@ -468,7 +471,10 @@ export default function CaseDetailScreen() {
       await updateInspection(id as string, {
         customerName: editedCustomerName,
         customerPhone: editedCustomerPhone,
+        carMake: editedCarMake,
         carModel: editedCarModel,
+        carMakeId: editedCarMakeId,
+        carModelId: editedCarModelId,
         plate: editedPlate
       }, cpanelId || undefined);
 
@@ -476,7 +482,10 @@ export default function CaseDetailScreen() {
         ...caseData,
         customerName: editedCustomerName,
         customerPhone: editedCustomerPhone,
+        carMake: editedCarMake,
         carModel: editedCarModel,
+        carMakeId: editedCarMakeId,
+        carModelId: editedCarModelId,
         plate: editedPlate
       });
       setEditCustomerMode(false);
@@ -708,6 +717,30 @@ export default function CaseDetailScreen() {
                     left={<TextInput.Icon icon="car" />}
                     placeholder="AA-123-BB"
                   />
+                  
+                  {/* Car Make & Model */}
+                  <Text style={styles.sectionSubtitle}>მანქანის მარკა და მოდელი</Text>
+                  <View style={styles.carMakeModelRow}>
+                    <TextInput
+                      label="მარკა"
+                      value={editedCarMake}
+                      onChangeText={setEditedCarMake}
+                      mode="outlined"
+                      style={[styles.modernInput, styles.halfInput]}
+                      outlineStyle={styles.inputOutline}
+                      placeholder="Toyota"
+                    />
+                    <TextInput
+                      label="მოდელი"
+                      value={editedCarModel}
+                      onChangeText={setEditedCarModel}
+                      mode="outlined"
+                      style={[styles.modernInput, styles.halfInput]}
+                      outlineStyle={styles.inputOutline}
+                      placeholder="Camry"
+                    />
+                  </View>
+                  
                   <View style={styles.modernEditActions}>
                     <Button
                       mode="outlined"
@@ -769,9 +802,26 @@ export default function CaseDetailScreen() {
                     </View>
                     <View style={styles.infoTextContainer}>
                       <Text style={styles.infoLabel}>სახელმწიფო ნომერი</Text>
-                      <Text style={styles.infoValue}>{caseData.plate || caseData.carModel || 'N/A'}</Text>
+                      <Text style={styles.infoValue}>{caseData.plate || 'N/A'}</Text>
                     </View>
                   </View>
+
+                  {(caseData.carMake || caseData.carModel) && (
+                    <>
+                      <Divider style={styles.modernDivider} />
+                      <View style={styles.modernInfoRow}>
+                        <View style={[styles.infoIconContainer, { backgroundColor: COLORS.primary + '15' }]}>
+                          <MaterialCommunityIcons name="car-side" size={22} color={COLORS.primary} />
+                        </View>
+                        <View style={styles.infoTextContainer}>
+                          <Text style={styles.infoLabel}>მარკა / მოდელი</Text>
+                          <Text style={styles.infoValue}>
+                            {[caseData.carMake, caseData.carModel].filter(Boolean).join(' ')}
+                          </Text>
+                        </View>
+                      </View>
+                    </>
+                  )}
                 </View>
               )}
             </Card.Content>
@@ -2353,5 +2403,19 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 12,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  carMakeModelRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  halfInput: {
+    flex: 1,
   },
 });

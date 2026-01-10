@@ -3,27 +3,27 @@ import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    FlatList,
-    Linking,
-    RefreshControl,
-    StyleSheet,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  FlatList,
+  Linking,
+  RefreshControl,
+  StyleSheet,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import {
-    ActivityIndicator,
-    Button,
-    Card,
-    Chip,
-    Divider,
-    FAB,
-    IconButton,
-    Menu,
-    Searchbar,
-    Surface,
-    Text
+  ActivityIndicator,
+  Button,
+  Card,
+  Chip,
+  Divider,
+  FAB,
+  IconButton,
+  Menu,
+  Searchbar,
+  Surface,
+  Text
 } from 'react-native-paper';
 
 import { COLORS } from '../../src/config/constants';
@@ -44,14 +44,18 @@ interface InspectionCase {
   id: string;
   customerName?: string;
   customerPhone: string;
+  carMake?: string;
   carModel?: string;
+  carMakeId?: string;
+  carModelId?: string;
   plate?: string;
   totalPrice: number;
-  services?: Array<{ serviceName: string; price: number; count: number }>;
+  services?: Array<{ serviceName: string; price: number; count: number; key?: string }>;
   parts?: any[];
   status: string;
   createdAt: string;
   updatedAt: string;
+  cpanelInvoiceId?: string;
 }
 
 interface CaseWithDetails extends InspectionCase {
@@ -85,7 +89,10 @@ export default function CasesScreen() {
         id: inspection.id,
         customerName: inspection.customerName || 'N/A',
         customerPhone: inspection.customerPhone || 'N/A',
+        carMake: inspection.carMake || '',
         carModel: inspection.carModel || 'Unknown',
+        carMakeId: inspection.carMakeId || '',
+        carModelId: inspection.carModelId || '',
         plate: inspection.plate || inspection.carModel || 'N/A',
         totalPrice: inspection.totalPrice || 0,
         services: inspection.services || [],
@@ -93,6 +100,7 @@ export default function CasesScreen() {
         status: inspection.status || 'Pending',
         createdAt: inspection.createdAt,
         updatedAt: inspection.updatedAt,
+        cpanelInvoiceId: inspection.cpanelInvoiceId || '',
         statusColor: getStatusColor(inspection.createdAt),
         statusLabel: getStatusLabel(inspection.createdAt),
       }));
@@ -144,7 +152,6 @@ export default function CasesScreen() {
           }
         }
       ]
-```
     );
   };
 
@@ -276,8 +283,13 @@ export default function CasesScreen() {
               </View>
               <View style={styles.vehicleDetails}>
                 <Text style={styles.vehicleModel} numberOfLines={1}>
-                  {item.plate || item.carModel || 'No Plate'}
+                  {item.plate || 'No Plate'}
                 </Text>
+                {(item.carMake || item.carModel) && (
+                  <Text style={styles.vehicleMakeModel} numberOfLines={1}>
+                    {[item.carMake, item.carModel].filter(Boolean).join(' ')}
+                  </Text>
+                )}
                 <Text style={styles.customerNameText} numberOfLines={1}>
                   {item.customerName}
                 </Text>
@@ -731,6 +743,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text.primary,
     letterSpacing: -0.2,
+  },
+  vehicleMakeModel: {
+    fontSize: 13,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+    fontWeight: '500',
   },
   customerNameText: {
     fontSize: 14,

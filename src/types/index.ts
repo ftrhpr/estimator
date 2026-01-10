@@ -21,6 +21,8 @@ export interface Vehicle {
   customerId: string;
   make: string;
   model: string;
+  makeId?: string;   // Car2DB make ID for reference
+  modelId?: string;  // Car2DB model ID for reference
   year: number;
   color: string;
   vin?: string;

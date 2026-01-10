@@ -1,6 +1,6 @@
-import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { getApps, initializeApp } from 'firebase/app';
+import { addDoc, collection, deleteDoc, doc, getDocs, getFirestore, orderBy, query, updateDoc, where } from 'firebase/firestore';
+import { deleteObject, getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage';
 import { syncInvoiceToCPanel } from './cpanelService';
 
 // Firebase configuration using environment variables
@@ -223,22 +223,19 @@ export const updateInspection = async (inspectionId, updates, cpanelInvoiceId = 
     console.log('✅ Invoice updated in Firebase:', inspectionId);
     
     // Step 2: Sync update to cPanel (non-blocking)
-    // Only sync if we have a cPanel invoice ID
-    if (cpanelInvoiceId && updates) {
-      syncUpdateToCPanel(cpanelInvoiceId, updates)
-        .then(result => {
-          if (result.success) {
-            console.log('✅ Invoice update synced to cPanel:', cpanelInvoiceId);
-          } else if (result.skipped) {
-            console.log('⚠️ cPanel update skipped:', result.reason);
-          } else {
-            console.error('❌ cPanel update failed:', result.error);
-          }
-        })
-        .catch(error => {
-          console.error('❌ cPanel update error:', error);
-        });
-    }
+    syncToCPanel(inspectionId, updates, cpanelInvoiceId, docRef)
+      .then(result => {
+        if (result.success) {
+          console.log('✅ Invoice synced to cPanel:', result.cpanelId || cpanelInvoiceId);
+        } else if (result.skipped) {
+          console.log('⚠️ cPanel sync skipped:', result.reason);
+        } else {
+          console.error('❌ cPanel sync failed:', result.error);
+        }
+      })
+      .catch(error => {
+        console.error('❌ cPanel sync error:', error);
+      });
   } catch (error) {
     console.error('Error updating inspection:', error);
     throw error;
@@ -246,23 +243,73 @@ export const updateInspection = async (inspectionId, updates, cpanelInvoiceId = 
 };
 
 /**
- * Helper function to sync updates to cPanel
- * @param {string} cpanelInvoiceId - cPanel invoice ID
+ * Helper function to sync to cPanel (update existing or create new)
+ * @param {string} inspectionId - Firebase document ID
  * @param {Object} updates - Updates to sync
+ * @param {string} cpanelInvoiceId - Optional cPanel invoice ID
+ * @param {Object} docRef - Firestore document reference
  */
-const syncUpdateToCPanel = async (cpanelInvoiceId, updates) => {
+const syncToCPanel = async (inspectionId, updates, cpanelInvoiceId, docRef) => {
   try {
-    console.log('[Firebase] Syncing update to cPanel:', { cpanelInvoiceId, updates });
-    const { updateInvoiceToCPanel } = await import('./cpanelService');
-    const result = await updateInvoiceToCPanel(cpanelInvoiceId, updates);
-    console.log('[Firebase] cPanel update result:', result);
-    return result;
+    const { updateInvoiceToCPanel, fetchCPanelInvoiceId, syncInvoiceToCPanel, isCPanelConfigured } = await import('./cpanelService');
+    
+    if (!isCPanelConfigured()) {
+      return { success: false, skipped: true, reason: 'cPanel not configured' };
+    }
+    
+    let cpanelId = cpanelInvoiceId;
+    
+    // If no cPanel ID provided, try to fetch it from cPanel
+    if (!cpanelId) {
+      console.log('[Firebase] No cPanel ID provided, fetching from cPanel...');
+      cpanelId = await fetchCPanelInvoiceId(inspectionId);
+      
+      // If found, save it to Firebase for future use
+      if (cpanelId && docRef) {
+        try {
+          await updateDoc(docRef, { cpanelInvoiceId: cpanelId });
+          console.log('[Firebase] Saved cPanel ID to Firebase:', cpanelId);
+        } catch (err) {
+          console.warn('[Firebase] Failed to save cPanel ID:', err);
+        }
+      }
+    }
+    
+    // If we have a cPanel ID, update the existing record
+    if (cpanelId) {
+      console.log('[Firebase] Updating existing cPanel record:', cpanelId);
+      const result = await updateInvoiceToCPanel(cpanelId, updates);
+      return { ...result, cpanelId };
+    }
+    
+    // If no cPanel ID found, create a new record
+    console.log('[Firebase] No cPanel record found, creating new one...');
+    
+    // Get full document data for creating new record
+    const { getDoc } = await import('firebase/firestore');
+    const docSnap = await getDoc(docRef);
+    
+    if (docSnap.exists()) {
+      const fullData = { ...docSnap.data(), ...updates };
+      const createResult = await syncInvoiceToCPanel(fullData, inspectionId);
+      
+      // Save the new cPanel ID to Firebase
+      if (createResult.success && createResult.cpanelId) {
+        try {
+          await updateDoc(docRef, { cpanelInvoiceId: createResult.cpanelId });
+          console.log('[Firebase] Saved new cPanel ID to Firebase:', createResult.cpanelId);
+        } catch (err) {
+          console.warn('[Firebase] Failed to save new cPanel ID:', err);
+        }
+      }
+      
+      return createResult;
+    }
+    
+    return { success: false, error: 'Document not found' };
   } catch (error) {
-    console.error('Error syncing update to cPanel:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
+    console.error('[Firebase] Error in syncToCPanel:', error);
+    return { success: false, error: error.message };
   }
 };
 
