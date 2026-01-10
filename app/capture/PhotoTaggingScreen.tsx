@@ -402,14 +402,34 @@ export default function PhotoTaggingScreen() {
   };
 
   const renderPhotoTag = (tag: PhotoTag) => {
+    // Calculate displayed image dimensions
+    const aspectRatio = actualImageSize.width / actualImageSize.height;
+    const containerAspectRatio = containerDimensions.width / containerDimensions.height;
+
+    let displayWidth, displayHeight, offsetX, offsetY;
+
+    if (aspectRatio > containerAspectRatio) {
+      // Image is wider - constrained by width
+      displayWidth = containerDimensions.width;
+      displayHeight = containerDimensions.width / aspectRatio;
+      offsetX = 0;
+      offsetY = (containerDimensions.height - displayHeight) / 2;
+    } else {
+      // Image is taller - constrained by height
+      displayHeight = containerDimensions.height;
+      displayWidth = containerDimensions.height * aspectRatio;
+      offsetY = 0;
+      offsetX = (containerDimensions.width - displayWidth) / 2;
+    }
+
     // Use percentage if available, otherwise use absolute coordinates
-    const displayX = tag.xPercent !== undefined && imageLayout.width > 0
-      ? tag.xPercent * imageLayout.width
-      : tag.x;
-    const displayY = tag.yPercent !== undefined && imageLayout.height > 0
-      ? tag.yPercent * imageLayout.height
-      : tag.y;
-      
+    const displayX = tag.xPercent !== undefined && displayWidth > 0
+      ? tag.xPercent * displayWidth + offsetX
+      : tag.x + offsetX;
+    const displayY = tag.yPercent !== undefined && displayHeight > 0
+      ? tag.yPercent * displayHeight + offsetY
+      : tag.y + offsetY;
+
     return (
       <TouchableOpacity
         key={tag.id}
@@ -505,11 +525,11 @@ export default function PhotoTaggingScreen() {
 
             {/* Tap instruction overlay */}
             {currentPhoto.tags.length === 0 && (
-              <View style={styles.instructionOverlay}>
-                <MaterialCommunityIcons 
-                  name="gesture-tap" 
-                  size={48} 
-                  color={COLORS.text.onPrimary} 
+              <View style={styles.instructionOverlay} pointerEvents="none">
+                <MaterialCommunityIcons
+                  name="gesture-tap"
+                  size={48}
+                  color={COLORS.text.onPrimary}
                 />
                 <Text style={styles.instructionText}>
                   Tap on damage areas to assign services
@@ -567,10 +587,13 @@ export default function PhotoTaggingScreen() {
             <List.Item
               key={service.key}
               title={service.nameEn}
-              description={`${service.nameKa} • ${formatCurrencyGEL(service.basePrice)}`}
+              description={service.description
+                ? `${service.nameKa} • ${service.description}\n${formatCurrencyGEL(service.basePrice)}`
+                : `${service.nameKa} • ${formatCurrencyGEL(service.basePrice)}`
+              }
               left={(props) => (
-                <List.Icon 
-                  {...props} 
+                <List.Icon
+                  {...props}
                   icon={service.icon}
                   color={COLORS.primary}
                 />

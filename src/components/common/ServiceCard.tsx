@@ -47,6 +47,11 @@ export const ServiceCard: React.FC<ServiceCardProps> = ({
                 {service.nameEn}
               </Text>
             )}
+            {service.description && (
+              <Text variant="bodySmall" style={styles.description}>
+                {service.description}
+              </Text>
+            )}
             <Text variant="titleSmall" style={styles.price}>
               {formatCurrency(service.basePrice)}
             </Text>
@@ -135,6 +140,11 @@ const styles = StyleSheet.create({
   englishName: {
     color: COLORS.text.secondary,
     marginTop: 2,
+  },
+  description: {
+    color: COLORS.text.secondary,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   price: {
     color: COLORS.primary,

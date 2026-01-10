@@ -62,7 +62,7 @@ export default function QuickCaptureScreen() {
   const [showPreview, setShowPreview] = useState(false);
   const [facing, setFacing] = useState<CameraType>('back');
   const [isCapturing, setIsCapturing] = useState(false);
-  
+
   const cameraRef = useRef<CameraView>(null);
 
   // Request permissions on focus

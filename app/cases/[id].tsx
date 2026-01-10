@@ -99,7 +99,8 @@ export default function CaseDetailScreen() {
 
   const normalizeService = (service: any) => {
     return {
-      serviceName: service.serviceName || service.description || service.name || 'Unknown Service',
+      serviceName: service.serviceName || service.name || 'Unknown Service',
+      description: service.description || '',
       price: service.price || service.hourly_rate || service.rate || 0,
       count: service.count || 1,
     };
@@ -875,11 +876,16 @@ export default function CaseDetailScreen() {
                               <MaterialCommunityIcons name="tools" size={16} color={COLORS.primary} />
                             </View>
                             <View style={styles.serviceTextContainer}>
-                              <Text style={styles.modernServiceName}>{getServiceNameGeorgian(normalized.serviceName)}</Text>
-                              {normalized.count > 1 && (
-                                <View style={styles.countBadge}>
-                                  <Text style={styles.countBadgeText}>x{normalized.count}</Text>
-                                </View>
+                              <View style={styles.serviceNameRow}>
+                                <Text style={styles.modernServiceName}>{getServiceNameGeorgian(normalized.serviceName)}</Text>
+                                {normalized.count > 1 && (
+                                  <View style={styles.countBadge}>
+                                    <Text style={styles.countBadgeText}>x{normalized.count}</Text>
+                                  </View>
+                                )}
+                              </View>
+                              {normalized.description && (
+                                <Text style={styles.serviceDescription}>{normalized.description}</Text>
                               )}
                             </View>
                           </View>
@@ -1693,6 +1699,10 @@ const styles = StyleSheet.create({
   },
   serviceTextContainer: {
     flex: 1,
+    flexDirection: 'column',
+    gap: 4,
+  },
+  serviceNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1701,6 +1711,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     color: COLORS.text.primary,
+  },
+  serviceDescription: {
+    fontSize: 13,
+    color: COLORS.text.secondary,
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   modernServiceCount: {
     fontSize: 12,

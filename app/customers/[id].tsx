@@ -12,6 +12,7 @@ interface Invoice {
   customerName: string;
   customerPhone: string;
   carModel: string;
+  plate?: string;
   totalPrice: number;
   status: string;
   createdAt: string;
@@ -48,10 +49,10 @@ export default function CustomerDetailScreen() {
       if (customerInvoices.length > 0) {
         setCustomerName(customerInvoices[0].customerName || 'Unknown');
         
-        // Get unique vehicles
+        // Get unique vehicles (prefer plate, fallback to carModel)
         const uniqueVehicles = [...new Set(
           customerInvoices
-            .map((inv: any) => inv.carModel)
+            .map((inv: any) => inv.plate || inv.carModel)
             .filter((model: string) => model)
         )];
         setVehicles(uniqueVehicles);
@@ -225,7 +226,7 @@ export default function CustomerDetailScreen() {
                     <View style={styles.invoiceInfo}>
                       <View style={styles.invoiceRow}>
                         <MaterialCommunityIcons name="car" size={16} color={COLORS.text.secondary} />
-                        <Text style={styles.vehicleText}>{invoice.carModel}</Text>
+                        <Text style={styles.vehicleText}>{invoice.plate || invoice.carModel}</Text>
                       </View>
                       <View style={styles.invoiceRow}>
                         <MaterialCommunityIcons name="calendar" size={16} color={COLORS.text.secondary} />

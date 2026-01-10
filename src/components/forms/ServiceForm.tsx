@@ -21,6 +21,7 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
   const [formData, setFormData] = useState<ServiceFormData>({
     nameEn: service?.nameEn || '',
     nameKa: service?.nameKa || '',
+    description: service?.description || '',
     basePrice: service?.basePrice?.toString() || '',
     category: service?.category || 'bodywork',
   });
@@ -101,6 +102,17 @@ export const ServiceForm: React.FC<ServiceFormProps> = ({
           {errors.nameKa && (
             <Text style={styles.errorText}>{errors.nameKa}</Text>
           )}
+
+          <TextInput
+            label="Description (Optional)"
+            value={formData.description}
+            onChangeText={(value) => updateField('description', value)}
+            style={styles.input}
+            multiline
+            numberOfLines={3}
+            disabled={loading}
+            placeholder="Add optional description for this service"
+          />
 
           <TextInput
             label="Base Price ($)"

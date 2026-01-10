@@ -35,6 +35,7 @@ interface EstimateItem {
   id: string;
   serviceName: string;
   serviceNameKa?: string;
+  description?: string;
   price: number;
   count?: number;
   photoAngle?: string;
@@ -503,20 +504,26 @@ export default function EstimateSummaryScreen() {
               <View key={item.id}>
                 <List.Item
                   title={item.serviceName}
-                  description={item.count && item.count > 1 ? `Quantity: ${item.count}` : 'Single service'}
+                  description={
+                    item.description
+                      ? `${item.description}${item.count && item.count > 1 ? ` • Quantity: ${item.count}` : ''}`
+                      : item.count && item.count > 1
+                      ? `Quantity: ${item.count}`
+                      : 'Single service'
+                  }
                   right={() => (
                     <Text style={styles.itemPrice}>{formatCurrencyGEL(item.price)}</Text>
                   )}
                   left={() => (
                     <View style={styles.serviceIconContainer}>
-                      <MaterialCommunityIcons 
-                        name="wrench" 
-                        size={24} 
+                      <MaterialCommunityIcons
+                        name="wrench"
+                        size={24}
                         color={COLORS.primary}
                       />
                       {item.count && item.count > 1 && (
-                        <Chip 
-                          mode="flat" 
+                        <Chip
+                          mode="flat"
                           style={styles.countBadge}
                           textStyle={styles.countBadgeText}
                         >

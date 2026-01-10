@@ -53,6 +53,7 @@ export interface Service {
   key: string;
   nameEn: string;
   nameKa: string;
+  description?: string;
   basePrice: number;
   category: 'bodywork' | 'painting' | 'mechanical' | 'specialized' | 'finishing';
   isActive: boolean;
@@ -168,6 +169,7 @@ export interface VehicleFormData {
 export interface ServiceFormData {
   nameEn: string;
   nameKa: string;
+  description?: string;
   basePrice: string;
   category: string;
 }
