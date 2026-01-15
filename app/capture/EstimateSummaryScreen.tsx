@@ -145,19 +145,30 @@ export default function EstimateSummaryScreen() {
         setEstimateItems(items);
         setPhotosData(data.photos || []);
         setPartsData(data.parts || []);
-        // Load parts if available - ensure each part has an ID and required fields
+        // Load inventory parts if available - ensure each part has an ID and required fields
+        // NOTE: data.parts from PhotoTaggingScreen contains damage tagging data (partName, damages),
+        // NOT inventory parts. Only load as inventory parts if they have the correct structure.
         if (data.parts && Array.isArray(data.parts)) {
-          const partsWithIds = data.parts.map((p: any, idx: number) => ({
-            id: p.id || `loaded-part-${idx}-${Date.now()}`,
-            name: p.name || p.nameKa || 'Unnamed Part',
-            nameKa: p.nameKa || '',
-            partNumber: p.partNumber || p.part_number || '',
-            quantity: p.quantity || 1,
-            unitPrice: p.unitPrice || p.unit_price || 0,
-            totalPrice: p.totalPrice || p.total_price || (p.quantity || 1) * (p.unitPrice || p.unit_price || 0),
-            notes: p.notes || '',
-          }));
-          setParts(partsWithIds);
+          // Filter to only include actual inventory parts (have unitPrice or quantity fields)
+          // Exclude damage tagging data which has partName and damages fields
+          const inventoryParts = data.parts.filter((p: any) => 
+            (p.unitPrice !== undefined || p.unit_price !== undefined || p.name !== undefined) && 
+            !p.damages && !p.partName
+          );
+          
+          if (inventoryParts.length > 0) {
+            const partsWithIds = inventoryParts.map((p: any, idx: number) => ({
+              id: p.id || `loaded-part-${idx}-${Date.now()}`,
+              name: p.name || p.nameKa || 'Unnamed Part',
+              nameKa: p.nameKa || '',
+              partNumber: p.partNumber || p.part_number || '',
+              quantity: p.quantity || 1,
+              unitPrice: p.unitPrice || p.unit_price || 0,
+              totalPrice: p.totalPrice || p.total_price || (p.quantity || 1) * (p.unitPrice || p.unit_price || 0),
+              notes: p.notes || '',
+            }));
+            setParts(partsWithIds);
+          }
         }
       } catch (error) {
         console.error('Error parsing estimate data:', error);
@@ -665,9 +676,9 @@ export default function EstimateSummaryScreen() {
         <Card style={styles.totalCard}>
           <Card.Content>
             <View style={styles.totalHeader}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.totalLabel}>სულ შეფასება</Text>
-                <Text style={styles.totalSubtext}>
+                <Text style={styles.totalSubtext} numberOfLines={1}>
                   {estimateItems.length} სერვისი • მზადაა დასადასტურებლად
                 </Text>
               </View>
@@ -1381,6 +1392,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: SPACING.md,
   },
   totalLabel: {
     color: COLORS.text.onPrimary,
@@ -1389,13 +1401,15 @@ const styles = StyleSheet.create({
   },
   totalPrice: {
     color: COLORS.text.onPrimary,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
+    flexShrink: 0,
   },
   totalSubtext: {
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
+    fontSize: 13,
     marginTop: SPACING.xs,
+    flexShrink: 1,
   },
   discountCard: {
     marginBottom: SPACING.lg,
