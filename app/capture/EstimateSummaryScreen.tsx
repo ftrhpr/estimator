@@ -28,6 +28,7 @@ import {
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
 import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 import { createInspection, getAllInspections } from '../../src/services/firebase';
+import { PartsService } from '../../src/services/partsService';
 import { StorageService } from '../../src/services/storageService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
@@ -98,6 +99,11 @@ export default function EstimateSummaryScreen() {
   const [partUnitPrice, setPartUnitPrice] = useState('');
   const [partNotes, setPartNotes] = useState('');
   
+  // Discounts state
+  const [servicesDiscount, setServicesDiscount] = useState('0');
+  const [partsDiscount, setPartsDiscount] = useState('0');
+  const [globalDiscount, setGlobalDiscount] = useState('0');
+  
   const cameraRef = useRef<CameraView>(null);
 
   // Initialize estimate data from params
@@ -165,15 +171,22 @@ export default function EstimateSummaryScreen() {
   }, [params.estimateData]);
 
   const getServicesTotal = () => {
-    return estimateItems.reduce((total, item) => total + item.price, 0);
+    const subtotal = estimateItems.reduce((total, item) => total + item.price, 0);
+    const discount = (parseFloat(servicesDiscount) || 0) / 100;
+    return Math.max(0, subtotal - (subtotal * discount));
   };
 
   const getPartsTotal = () => {
-    return parts.reduce((total, part) => total + part.totalPrice, 0);
+    const subtotal = parts.reduce((total, part) => total + part.totalPrice, 0);
+    const discount = (parseFloat(partsDiscount) || 0) / 100;
+    return Math.max(0, subtotal - (subtotal * discount));
   };
 
   const getTotalPrice = () => {
-    return getServicesTotal() + getPartsTotal();
+    const subtotal = getServicesTotal() + getPartsTotal();
+    const globalDiscountPercent = (parseFloat(globalDiscount) || 0) / 100;
+    const finalTotal = Math.max(0, subtotal - (subtotal * globalDiscountPercent));
+    return finalTotal;
   };
 
   // Parts management functions
@@ -199,7 +212,7 @@ export default function EstimateSummaryScreen() {
     setShowPartsModal(true);
   };
 
-  const handleSavePart = () => {
+  const handleSavePart = async () => {
     const quantity = parseInt(partQuantity) || 1;
     const unitPrice = parseFloat(partUnitPrice) || 0;
     const totalPrice = quantity * unitPrice;
@@ -225,12 +238,39 @@ export default function EstimateSummaryScreen() {
       notes: partNotes.trim(),
     };
 
+    // Save to featured parts database if this is a new part with Georgian name
+    if (!editingPart && partNameKa.trim()) {
+      try {
+        // Check if part already exists
+        const exists = await PartsService.partExists(partNameKa.trim());
+        if (!exists) {
+          await PartsService.addPart({
+            nameKa: partNameKa.trim(),
+            nameEn: partName.trim() || undefined,
+            name: partName.trim() || partNameKa.trim(),
+          });
+          console.log('[EstimateSummary] Part saved to featured parts database');
+        }
+      } catch (error) {
+        console.error('[EstimateSummary] Error saving part to database:', error);
+        // Don't block part addition if database save fails
+      }
+    }
+
     if (editingPart) {
       setParts(parts.map(p => p.id === editingPart.id ? newPart : p));
     } else {
       setParts([...parts, newPart]);
     }
 
+    // Reset form
+    setEditingPart(null);
+    setPartName('');
+    setPartNameKa('');
+    setPartNumber('');
+    setPartQuantity('1');
+    setPartUnitPrice('');
+    setPartNotes('');
     setShowPartsModal(false);
   };
 
@@ -530,6 +570,10 @@ export default function EstimateSummaryScreen() {
         services: allServices,
         photos: uploadedPhotos.length > 0 ? uploadedPhotos : photosData,
         parts: partsForSync,
+        // Discounts
+        services_discount_percent: parseFloat(servicesDiscount) || 0,
+        parts_discount_percent: parseFloat(partsDiscount) || 0,
+        global_discount_percent: parseFloat(globalDiscount) || 0,
         status: 'Pending',
         isRepeatCustomer: customerInfo.isRepeat,
         createdAt: new Date().toISOString(),
@@ -628,6 +672,78 @@ export default function EstimateSummaryScreen() {
                 </Text>
               </View>
               <Text style={styles.totalPrice}>{formatCurrencyGEL(getTotalPrice())}</Text>
+            </View>
+          </Card.Content>
+        </Card>
+
+        {/* Discounts Card */}
+        <Card style={styles.discountCard}>
+          <Card.Content>
+            <View style={styles.discountHeader}>
+              <MaterialCommunityIcons name="percent" size={20} color={COLORS.primary} />
+              <Text style={styles.discountTitle}>ფასდაკლებები</Text>
+            </View>
+
+            <View style={styles.discountRow}>
+              <View style={styles.discountInputGroup}>
+                <Text style={styles.discountLabel}>სერვისები (%)</Text>
+                <TextInput
+                  value={servicesDiscount}
+                  onChangeText={setServicesDiscount}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  style={styles.discountInput}
+                  mode="outlined"
+                  dense
+                  outlineColor={COLORS.outline}
+                  activeOutlineColor={COLORS.primary}
+                />
+                {servicesDiscount && parseFloat(servicesDiscount) > 0 && (
+                  <Text style={styles.discountAmount}>
+                    -{formatCurrencyGEL((estimateItems.reduce((t, i) => t + i.price, 0) * (parseFloat(servicesDiscount) || 0)) / 100)}
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.discountInputGroup}>
+                <Text style={styles.discountLabel}>ნაწილები (%)</Text>
+                <TextInput
+                  value={partsDiscount}
+                  onChangeText={setPartsDiscount}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  style={styles.discountInput}
+                  mode="outlined"
+                  dense
+                  outlineColor={COLORS.outline}
+                  activeOutlineColor={COLORS.primary}
+                />
+                {partsDiscount && parseFloat(partsDiscount) > 0 && (
+                  <Text style={styles.discountAmount}>
+                    -{formatCurrencyGEL((parts.reduce((t, p) => t + p.totalPrice, 0) * (parseFloat(partsDiscount) || 0)) / 100)}
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.discountInputGroup}>
+                <Text style={styles.discountLabel}>საერთო (%)</Text>
+                <TextInput
+                  value={globalDiscount}
+                  onChangeText={setGlobalDiscount}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  style={styles.discountInput}
+                  mode="outlined"
+                  dense
+                  outlineColor={COLORS.outline}
+                  activeOutlineColor={COLORS.primary}
+                />
+                {globalDiscount && parseFloat(globalDiscount) > 0 && (
+                  <Text style={styles.discountAmount}>
+                    -{formatCurrencyGEL(((estimateItems.reduce((t, i) => t + i.price, 0) + parts.reduce((t, p) => t + p.totalPrice, 0)) * (parseFloat(globalDiscount) || 0)) / 100)}
+                  </Text>
+                )}
+              </View>
             </View>
           </Card.Content>
         </Card>
@@ -1055,7 +1171,7 @@ export default function EstimateSummaryScreen() {
               />
 
               <TextInput
-                label="Part Name (English)"
+                label="Part Name (English) (არასავალდებულო)"
                 value={partName}
                 onChangeText={setPartName}
                 placeholder="e.g. Steering Wheel, Bumper"
@@ -1138,7 +1254,16 @@ export default function EstimateSummaryScreen() {
           <View style={styles.modalActions}>
             <Button
               mode="outlined"
-              onPress={() => setShowPartsModal(false)}
+              onPress={() => {
+                setShowPartsModal(false);
+                setEditingPart(null);
+                setPartName('');
+                setPartNameKa('');
+                setPartNumber('');
+                setPartQuantity('1');
+                setPartUnitPrice('');
+                setPartNotes('');
+              }}
               style={styles.qrButton}
               contentStyle={styles.qrButtonContent}
               labelStyle={styles.qrButtonLabel}
@@ -1162,7 +1287,16 @@ export default function EstimateSummaryScreen() {
           <IconButton
             icon="close"
             size={24}
-            onPress={() => setShowPartsModal(false)}
+            onPress={() => {
+              setShowPartsModal(false);
+              setEditingPart(null);
+              setPartName('');
+              setPartNameKa('');
+              setPartNumber('');
+              setPartQuantity('1');
+              setPartUnitPrice('');
+              setPartNotes('');
+            }}
             style={styles.modalCloseButton}
             iconColor={COLORS.text.secondary}
           />
@@ -1262,6 +1396,46 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 14,
     marginTop: SPACING.xs,
+  },
+  discountCard: {
+    marginBottom: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    elevation: 2,
+    backgroundColor: '#FFF8E1',
+  },
+  discountHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  discountTitle: {
+    ...TYPOGRAPHY.h4,
+    color: COLORS.text.primary,
+    marginLeft: SPACING.xs,
+  },
+  discountRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    justifyContent: 'space-between',
+  },
+  discountInputGroup: {
+    flex: 1,
+    gap: SPACING.xs,
+  },
+  discountLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  discountInput: {
+    backgroundColor: '#fff',
+    height: 40,
+  },
+  discountAmount: {
+    fontSize: 11,
+    color: COLORS.error,
+    fontWeight: '600',
   },
   customerCard: {
     marginBottom: SPACING.lg,
