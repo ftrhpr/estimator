@@ -223,6 +223,8 @@ export default function CaseDetailScreen() {
         return;
       }
 
+      console.log('[Case Detail] cPanel data received:', cpanelData);
+
       const updatedData = {
         ...caseData,
         customerName: cpanelData.customerName || caseData.customerName,
@@ -233,6 +235,10 @@ export default function CaseDetailScreen() {
         status: cpanelData.status || caseData.status,
         services: cpanelData.services || caseData.services,
         parts: cpanelData.parts || caseData.parts,
+        // Sync discount fields from cPanel
+        services_discount_percent: cpanelData.services_discount_percent ?? caseData.services_discount_percent ?? 0,
+        parts_discount_percent: cpanelData.parts_discount_percent ?? caseData.parts_discount_percent ?? 0,
+        global_discount_percent: cpanelData.global_discount_percent ?? caseData.global_discount_percent ?? 0,
       };
 
       const { updateInspection } = require('../../src/services/firebase');
@@ -245,6 +251,10 @@ export default function CaseDetailScreen() {
         status: updatedData.status,
         services: updatedData.services,
         parts: updatedData.parts,
+        // Save discount fields to Firebase
+        services_discount_percent: updatedData.services_discount_percent,
+        parts_discount_percent: updatedData.parts_discount_percent,
+        global_discount_percent: updatedData.global_discount_percent,
       });
 
       setCaseData(updatedData);
@@ -254,6 +264,10 @@ export default function CaseDetailScreen() {
       setEditedCustomerPhone(updatedData.customerPhone || '');
       setEditedCarModel(updatedData.carModel || '');
       setEditedPlate(updatedData.plate || '');
+      // Update discount state
+      setServicesDiscount(String(updatedData.services_discount_percent || 0));
+      setPartsDiscount(String(updatedData.parts_discount_percent || 0));
+      setGlobalDiscount(String(updatedData.global_discount_percent || 0));
 
       Alert.alert('✅ Sync Complete', 'Data has been synced from cPanel successfully.');
     } catch (error) {
@@ -261,6 +275,58 @@ export default function CaseDetailScreen() {
       Alert.alert('❌ Sync Error', 'Failed to sync data from cPanel.');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // Silent background sync from cPanel (no alerts, used on load)
+  const silentSyncFromCPanel = async (cpanelId: string, currentData: any) => {
+    try {
+      const { fetchInvoiceFromCPanel } = require('../../src/services/cpanelService');
+      const cpanelData = await fetchInvoiceFromCPanel(cpanelId);
+
+      if (!cpanelData) {
+        console.log('[Case Detail] Silent sync: No cPanel data found');
+        return;
+      }
+
+      console.log('[Case Detail] Silent sync: Comparing cPanel data with local');
+
+      // Check if cPanel has different discount values
+      const hasDiscountChanges = 
+        cpanelData.services_discount_percent !== (currentData.services_discount_percent || 0) ||
+        cpanelData.parts_discount_percent !== (currentData.parts_discount_percent || 0) ||
+        cpanelData.global_discount_percent !== (currentData.global_discount_percent || 0);
+
+      if (hasDiscountChanges) {
+        console.log('[Case Detail] Silent sync: Discount changes detected, updating Firebase');
+        
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, {
+          services_discount_percent: cpanelData.services_discount_percent ?? 0,
+          parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
+          global_discount_percent: cpanelData.global_discount_percent ?? 0,
+          totalPrice: cpanelData.totalPrice || currentData.totalPrice,
+        });
+
+        // Update local state
+        setServicesDiscount(String(cpanelData.services_discount_percent || 0));
+        setPartsDiscount(String(cpanelData.parts_discount_percent || 0));
+        setGlobalDiscount(String(cpanelData.global_discount_percent || 0));
+        setCaseData((prev: any) => ({
+          ...prev,
+          services_discount_percent: cpanelData.services_discount_percent ?? 0,
+          parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
+          global_discount_percent: cpanelData.global_discount_percent ?? 0,
+          totalPrice: cpanelData.totalPrice || prev.totalPrice,
+        }));
+
+        console.log('[Case Detail] Silent sync: Discounts updated from cPanel');
+      } else {
+        console.log('[Case Detail] Silent sync: No changes detected');
+      }
+    } catch (error) {
+      console.error('[Case Detail] Silent sync error (non-blocking):', error);
+      // Don't show error to user, this is a background sync
     }
   };
 
@@ -292,6 +358,8 @@ export default function CaseDetailScreen() {
         if (data.cpanelInvoiceId) {
           setCpanelInvoiceId(data.cpanelInvoiceId);
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
+          // Background sync from cPanel to get latest data (non-blocking)
+          silentSyncFromCPanel(data.cpanelInvoiceId, data);
         }
       } else {
         Alert.alert('❌ Error', 'Case not found');
