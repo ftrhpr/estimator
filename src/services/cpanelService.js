@@ -418,9 +418,17 @@ export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
   try {
     console.log('[cPanel API] Updating invoice:', invoiceId);
     
+    // Transform services to ensure proper name fields
+    let transformedServices = updateData.services;
+    if (updateData.services && Array.isArray(updateData.services)) {
+      transformedServices = transformServicesToGeorgian(updateData.services);
+      console.log('[cPanel API] Services transformed for update:', transformedServices);
+    }
+    
     const payload = {
       invoiceId: invoiceId,
       ...updateData,
+      services: transformedServices, // Use transformed services
     };
     
     // --- KEY CHANGE: Robustly find and normalize photo URLs for updates ---

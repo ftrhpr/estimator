@@ -292,17 +292,47 @@ export default function CaseDetailScreen() {
 
       console.log('[Case Detail] Silent sync: Comparing cPanel data with local');
 
-      // Check if cPanel has different discount values
-      const hasDiscountChanges = 
+      // Check if cPanel has different global discount values
+      const hasGlobalDiscountChanges = 
         cpanelData.services_discount_percent !== (currentData.services_discount_percent || 0) ||
         cpanelData.parts_discount_percent !== (currentData.parts_discount_percent || 0) ||
         cpanelData.global_discount_percent !== (currentData.global_discount_percent || 0);
 
-      if (hasDiscountChanges) {
+      // Check if cPanel services have different individual discounts
+      const cpanelServices = cpanelData.services || [];
+      const currentServices = currentData.services || [];
+      let hasServiceDiscountChanges = false;
+      
+      if (cpanelServices.length === currentServices.length) {
+        for (let i = 0; i < cpanelServices.length; i++) {
+          const cpanelDiscount = cpanelServices[i].discount_percent || 0;
+          const currentDiscount = currentServices[i].discount_percent || 0;
+          if (cpanelDiscount !== currentDiscount) {
+            hasServiceDiscountChanges = true;
+            console.log(`[Case Detail] Silent sync: Service ${i} discount changed: ${currentDiscount} -> ${cpanelDiscount}`);
+            break;
+          }
+        }
+      }
+
+      if (hasGlobalDiscountChanges || hasServiceDiscountChanges) {
         console.log('[Case Detail] Silent sync: Discount changes detected, updating Firebase');
+        
+        // Merge individual service discounts from cPanel to current services
+        const updatedServices = currentServices.map((service: any, index: number) => {
+          if (cpanelServices[index]) {
+            return {
+              ...service,
+              discount_percent: cpanelServices[index].discount_percent || 0,
+              discountedPrice: cpanelServices[index].discountedPrice || service.price,
+            };
+          }
+          return service;
+        });
         
         const { updateInspection } = require('../../src/services/firebase');
         await updateInspection(id as string, {
+          services: updatedServices,
           services_discount_percent: cpanelData.services_discount_percent ?? 0,
           parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
           global_discount_percent: cpanelData.global_discount_percent ?? 0,
@@ -315,11 +345,13 @@ export default function CaseDetailScreen() {
         setGlobalDiscount(String(cpanelData.global_discount_percent || 0));
         setCaseData((prev: any) => ({
           ...prev,
+          services: updatedServices,
           services_discount_percent: cpanelData.services_discount_percent ?? 0,
           parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
           global_discount_percent: cpanelData.global_discount_percent ?? 0,
           totalPrice: cpanelData.totalPrice || prev.totalPrice,
         }));
+        setEditedServices(updatedServices);
 
         console.log('[Case Detail] Silent sync: Discounts updated from cPanel');
       } else {
@@ -536,17 +568,28 @@ export default function CaseDetailScreen() {
       const serviceBasePrice = parseFloat(editServicePrice) || 0;
       const serviceDiscountedPrice = serviceBasePrice * (1 - serviceDiscountPercent / 100);
 
+      // Get the Georgian name - editServiceName may already be Georgian
+      const georgianName = editServiceName.trim();
+      
       const updatedServices = [...caseData.services];
       updatedServices[editingServiceIndex] = {
         ...updatedServices[editingServiceIndex],
-        serviceName: editServiceName,
-        serviceNameKa: getServiceNameGeorgian(editServiceName),
+        serviceName: georgianName,
+        serviceNameKa: georgianName,
+        name: georgianName, // For PHP compatibility
+        nameKa: georgianName, // Backup field
         description: editServiceDescription,
         price: serviceBasePrice,
         discountedPrice: serviceDiscountedPrice,
         discount_percent: serviceDiscountPercent,
         count: parseInt(editServiceCount) || 1,
       };
+      
+      console.log('[Case Detail] Saving service:', {
+        serviceName: georgianName,
+        price: serviceBasePrice,
+        discount_percent: serviceDiscountPercent,
+      });
 
       // Calculate new total with individual service discounts and global discounts
       const servicesSubtotal = updatedServices.reduce((sum, s) => {
@@ -689,10 +732,15 @@ export default function CaseDetailScreen() {
       const newService = {
         serviceName: georgianName, // Store Georgian as primary name
         serviceNameKa: georgianName,
+        name: georgianName, // For PHP compatibility
+        nameKa: georgianName, // Backup field
         serviceNameEn: selectedService?.nameEn || newServiceName, // Store English as backup
         price: parseFloat(newServicePrice) || 0,
         count: parseInt(newServiceCount) || 1,
+        discount_percent: 0, // Default no discount
       };
+      
+      console.log('[Case Detail] New service object:', newService);
 
       // Check if service already exists and combine if it does
       // Use editedServices if in edit mode, otherwise use caseData.services
