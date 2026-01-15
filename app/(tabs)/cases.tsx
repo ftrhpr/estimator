@@ -8,10 +8,9 @@ import {
     FlatList,
     Linking,
     RefreshControl,
-    Share,
     StyleSheet,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import {
     ActivityIndicator,
