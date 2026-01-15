@@ -8,6 +8,7 @@ import {
     FlatList,
     Linking,
     RefreshControl,
+    Share,
     StyleSheet,
     TouchableOpacity,
     View,
@@ -191,6 +192,26 @@ export default function CasesScreen() {
         }
       ]
     );
+  };
+
+  const handleSharePublicLink = async (item: CaseWithDetails) => {
+    if (!item.cpanelInvoiceId) {
+      Alert.alert('❌ შეცდომა', 'ინვოისი ჯერ არ არის სინქრონიზებული პორტალთან.');
+      return;
+    }
+    
+    const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?id=${item.cpanelInvoiceId}`;
+    
+    try {
+      await Share.share({
+        message: `📋 ინვოისი: ${item.customerName || 'მომხმარებელი'}\n🚗 ${item.plate || item.carModel || 'ავტომობილი'}\n💰 ჯამი: ${formatCurrencyGEL(item.totalPrice)}\n\n🔗 ლინკი: ${publicUrl}`,
+        url: publicUrl,
+        title: `ინვოისი #${item.id.slice(0, 8).toUpperCase()}`,
+      });
+    } catch (error: any) {
+      console.error('Error sharing link:', error);
+      Alert.alert('❌ შეცდომა', 'ლინკის გაზიარება ვერ მოხერხდა');
+    }
   };
 
   const getServiceNameGeorgian = (serviceName: string): string => {
@@ -408,6 +429,12 @@ export default function CasesScreen() {
               onPress={() => Linking.openURL(`tel:${item.customerPhone}`)}
             >
               <MaterialCommunityIcons name="phone-outline" size={24} color={COLORS.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.cardActionButton, styles.shareAction]}
+              onPress={() => handleSharePublicLink(item)}
+            >
+              <MaterialCommunityIcons name="share-variant" size={24} color={COLORS.success} />
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.cardActionButton, styles.deleteAction]}
@@ -896,6 +923,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFC',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  shareAction: {
+    backgroundColor: '#F0FDF4',
   },
   deleteAction: {
     backgroundColor: '#FEF2F2',

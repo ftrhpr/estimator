@@ -237,7 +237,8 @@ export default function CaseDetailScreen() {
         ...caseData,
         customerName: cpanelData.customerName || caseData.customerName,
         customerPhone: cpanelData.customerPhone || caseData.customerPhone,
-        carModel: cpanelData.carModel || caseData.carModel,
+        carMake: cpanelData.carMake || cpanelData.vehicleMake || caseData.carMake,
+        carModel: cpanelData.carModel || cpanelData.vehicleModel || caseData.carModel,
         plate: cpanelData.plate || caseData.plate,
         totalPrice: cpanelData.totalPrice || caseData.totalPrice,
         status: cpanelData.status || caseData.status,
@@ -253,6 +254,7 @@ export default function CaseDetailScreen() {
       await updateInspection(id as string, {
         customerName: updatedData.customerName,
         customerPhone: updatedData.customerPhone,
+        carMake: updatedData.carMake,
         carModel: updatedData.carModel,
         plate: updatedData.plate,
         totalPrice: updatedData.totalPrice,
@@ -270,6 +272,7 @@ export default function CaseDetailScreen() {
       setCaseParts(updatedData.parts || []);
       setEditedCustomerName(updatedData.customerName || '');
       setEditedCustomerPhone(updatedData.customerPhone || '');
+      setEditedCarMake(updatedData.carMake || '');
       setEditedCarModel(updatedData.carModel || '');
       setEditedPlate(updatedData.plate || '');
       // Update discount state
