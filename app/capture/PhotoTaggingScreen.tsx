@@ -46,6 +46,7 @@ interface PhotoTag {
   description?: string;
   price: number;
   originalPrice: number;
+  count: number;
 }
 
 interface TaggedPhoto {
@@ -85,6 +86,7 @@ export default function PhotoTaggingScreen() {
   const [editingTag, setEditingTag] = useState<PhotoTag | null>(null);
   const [priceAdjustmentVisible, setPriceAdjustmentVisible] = useState(false);
   const [tempPrice, setTempPrice] = useState(0);
+  const [tempQuantity, setTempQuantity] = useState(1);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
   const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
@@ -262,6 +264,7 @@ export default function PhotoTaggingScreen() {
       description: service.description || '',
       price: service.basePrice,
       originalPrice: service.basePrice,
+      count: 1,
     };
 
     setPhotos(prev => prev.map((photo, index) =>
@@ -314,6 +317,7 @@ export default function PhotoTaggingScreen() {
   const handleTagPress = (tag: PhotoTag) => {
     setEditingTag(tag);
     setTempPrice(tag.price);
+    setTempQuantity(tag.count || 1);
     setPriceAdjustmentVisible(true);
   };
 
@@ -435,7 +439,7 @@ export default function PhotoTaggingScreen() {
             ...photo,
             tags: photo.tags.map(tag =>
               tag.id === editingTag.id
-                ? { ...tag, price: tempPrice }
+                ? { ...tag, price: tempPrice, count: tempQuantity }
                 : tag
             ),
           }
@@ -521,12 +525,14 @@ export default function PhotoTaggingScreen() {
 
   const getTotalEstimate = () => {
     return photos.reduce((total, photo) => 
-      total + photo.tags.reduce((photoTotal, tag) => photoTotal + tag.price, 0), 0
+      total + photo.tags.reduce((photoTotal, tag) => photoTotal + (tag.price * (tag.count || 1)), 0), 0
     );
   };
 
   const getServiceCount = () => {
-    return photos.reduce((count, photo) => count + photo.tags.length, 0);
+    return photos.reduce((count, photo) => 
+      count + photo.tags.reduce((tagCount, tag) => tagCount + (tag.count || 1), 0), 0
+    );
   };
 
   const getCategories = () => {
@@ -577,15 +583,18 @@ export default function PhotoTaggingScreen() {
       photo.tags.forEach((tag) => {
         // Use serviceKey for grouping instead of serviceName to ensure proper matching
         const key = tag.serviceKey || tag.serviceName;
+        const tagCount = tag.count || 1;
+        const tagTotalPrice = tag.price * tagCount;
+        
         if (serviceMap[key]) {
-          serviceMap[key].totalPrice += tag.price;
-          serviceMap[key].count += 1;
+          serviceMap[key].totalPrice += tagTotalPrice;
+          serviceMap[key].count += tagCount;
         } else {
           serviceMap[key] = {
             serviceName: tag.serviceName,
             serviceNameKa: tag.serviceNameKa,
-            totalPrice: tag.price,
-            count: 1,
+            totalPrice: tagTotalPrice,
+            count: tagCount,
             serviceKey: tag.serviceKey || tag.serviceName,
           };
         }
@@ -1049,6 +1058,33 @@ export default function PhotoTaggingScreen() {
           </View>
 
           <Text style={styles.priceHint}>დააჭირეთ + ან - ფასის შესაცვლელად 10 ლარით</Text>
+
+          {/* Quantity Adjustment */}
+          <View style={styles.quantitySection}>
+            <Text style={styles.quantityLabel}>რაოდენობა</Text>
+            <View style={styles.quantityControl}>
+              <TouchableOpacity
+                style={[styles.quantityButton, tempQuantity <= 1 && styles.quantityButtonDisabled]}
+                onPress={() => setTempQuantity(Math.max(1, tempQuantity - 1))}
+                disabled={tempQuantity <= 1}
+              >
+                <MaterialCommunityIcons 
+                  name="minus" 
+                  size={20} 
+                  color={tempQuantity <= 1 ? COLORS.text.disabled : COLORS.primary} 
+                />
+              </TouchableOpacity>
+              <View style={styles.quantityDisplay}>
+                <Text style={styles.quantityText}>{tempQuantity}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.quantityButton}
+                onPress={() => setTempQuantity(tempQuantity + 1)}
+              >
+                <MaterialCommunityIcons name="plus" size={20} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
 
           <TextInput
             mode="outlined"
@@ -1603,6 +1639,45 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     fontSize: 12,
     marginBottom: SPACING.md,
+  },
+  quantitySection: {
+    marginBottom: SPACING.md,
+  },
+  quantityLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginBottom: SPACING.sm,
+    textAlign: 'center',
+  },
+  quantityControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.outline,
+    alignSelf: 'center',
+  },
+  quantityButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quantityButtonDisabled: {
+    opacity: 0.4,
+  },
+  quantityDisplay: {
+    paddingHorizontal: SPACING.lg,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  quantityText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text.primary,
   },
   manualPriceInput: {
     marginBottom: SPACING.lg,
