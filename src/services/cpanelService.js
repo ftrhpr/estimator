@@ -41,39 +41,50 @@ const getGeorgianServiceName = (serviceName) => {
 const transformServicesToGeorgian = (services) => {
   if (!Array.isArray(services)) return [];
   
+  console.log('[cPanel Service] transformServicesToGeorgian called with', services.length, 'services');
+  
   return services.map((service, index) => {
-    // Get Georgian name with multiple fallbacks
+    // Log EVERY field of the service object
+    console.log(`[cPanel Service] Service ${index} FULL OBJECT:`, JSON.stringify(service));
+    
+    // Get name from ALL possible fields - be very comprehensive
     let georgianName = '';
     
-    // Priority 1: serviceNameKa (if not empty)
-    if (service.serviceNameKa && service.serviceNameKa.trim()) {
-      georgianName = service.serviceNameKa.trim();
-    }
-    // Priority 2: nameKa (if not empty)
-    else if (service.nameKa && service.nameKa.trim()) {
-      georgianName = service.nameKa.trim();
-    }
-    // Priority 3: Look up Georgian name from English serviceName
-    else if (service.serviceName && service.serviceName.trim()) {
-      const lookedUp = getGeorgianServiceName(service.serviceName.trim());
-      georgianName = lookedUp && lookedUp.trim() ? lookedUp : service.serviceName.trim();
-    }
-    // Priority 4: Use name field (if not empty)
-    else if (service.name && service.name.trim()) {
-      const lookedUp = getGeorgianServiceName(service.name.trim());
-      georgianName = lookedUp && lookedUp.trim() ? lookedUp : service.name.trim();
-    }
-    // Priority 5: Use description (if not empty)
-    else if (service.description && service.description.trim()) {
-      georgianName = service.description.trim();
-    }
-    // Final fallback: Generic name with index
-    else {
-      georgianName = `სერვისი ${index + 1}`;
-      console.warn(`[cPanel Service] Service at index ${index} has no name, using fallback:`, service);
+    // Try all possible name fields in priority order
+    const possibleNames = [
+      service.serviceNameKa,
+      service.nameKa,
+      service.serviceName,
+      service.name,
+      service.description,
+    ];
+    
+    console.log(`[cPanel Service] Service ${index} possibleNames:`, possibleNames);
+    
+    for (const name of possibleNames) {
+      if (name && typeof name === 'string' && name.trim()) {
+        // Check if it's a Georgian name lookup needed
+        const trimmed = name.trim();
+        const lookedUp = getGeorgianServiceName(trimmed);
+        georgianName = (lookedUp && lookedUp.trim()) ? lookedUp : trimmed;
+        console.log(`[cPanel Service] Service ${index} found name: "${georgianName}" from field with value "${trimmed}"`);
+        break;
+      }
     }
     
-    console.log(`[cPanel Service] Service transform: "${service.serviceName || service.name || 'N/A'}" -> "${georgianName}"`);
+    // Final fallback: Generic name with index
+    if (!georgianName) {
+      georgianName = `სერვისი ${index + 1}`;
+      console.warn(`[cPanel Service] Service at index ${index} has no name, using fallback. Fields:`, {
+        serviceNameKa: service.serviceNameKa,
+        nameKa: service.nameKa,
+        serviceName: service.serviceName,
+        name: service.name,
+        description: service.description,
+      });
+    }
+    
+    console.log(`[cPanel Service] Service transform: Input names = [${service.serviceNameKa || 'N/A'}, ${service.serviceName || 'N/A'}, ${service.name || 'N/A'}] -> "${georgianName}"`);
     
     // Calculate discounted price if discount exists
     const discountPercent = service.discount_percent || 0;
@@ -85,6 +96,7 @@ const transformServicesToGeorgian = (services) => {
       serviceName: georgianName,
       serviceNameKa: georgianName,
       name: georgianName,  // Also set 'name' field for PHP compatibility
+      nameKa: georgianName, // Backup field
       originalName: service.serviceName || service.name || '',
       discount_percent: discountPercent,
       discountedPrice: discountedPrice,
@@ -417,12 +429,13 @@ export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
   
   try {
     console.log('[cPanel API] Updating invoice:', invoiceId);
+    console.log('[cPanel API] Raw updateData.services:', JSON.stringify(updateData.services, null, 2));
     
     // Transform services to ensure proper name fields
     let transformedServices = updateData.services;
     if (updateData.services && Array.isArray(updateData.services)) {
       transformedServices = transformServicesToGeorgian(updateData.services);
-      console.log('[cPanel API] Services transformed for update:', transformedServices);
+      console.log('[cPanel API] Services AFTER transform:', JSON.stringify(transformedServices, null, 2));
     }
     
     const payload = {
@@ -430,6 +443,9 @@ export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
       ...updateData,
       services: transformedServices, // Use transformed services
     };
+    
+    // Log the final services in payload
+    console.log('[cPanel API] FINAL payload.services:', JSON.stringify(payload.services, null, 2));
     
     // --- KEY CHANGE: Robustly find and normalize photo URLs for updates ---
     const photoUrls = payload.photos || payload.imageURL || payload.imageUrls;

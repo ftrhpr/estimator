@@ -110,17 +110,23 @@ export default function CaseDetailScreen() {
   };
 
   const normalizeService = (service: any) => {
-    // Prioritize Georgian name (serviceNameKa) over English (serviceName)
-    const georgianName = service.serviceNameKa || service.nameKa || '';
-    const englishName = service.serviceName || service.serviceNameEn || service.name || 'Unknown Service';
+    // Try all possible name fields
+    const possibleName = service.serviceNameKa || service.nameKa || service.serviceName || service.name || service.description || '';
+    const englishName = service.serviceNameEn || service.serviceName || service.name || 'Unknown Service';
+    
+    // Use the best available name, checking Georgian names first
+    let finalName = possibleName.trim();
+    if (!finalName) {
+      finalName = getServiceNameGeorgian(englishName) || englishName;
+    }
     
     return {
-      serviceName: georgianName || getServiceNameGeorgian(englishName) || englishName,
-      serviceNameKa: georgianName || getServiceNameGeorgian(englishName),
+      serviceName: finalName,
+      serviceNameKa: finalName,
       serviceNameEn: englishName,
       description: service.description || '',
       price: service.price || service.hourly_rate || service.rate || 0,
-      count: service.count || 1,
+      count: service.count || service.hours || 1,
     };
   };
 
@@ -585,11 +591,8 @@ export default function CaseDetailScreen() {
         count: parseInt(editServiceCount) || 1,
       };
       
-      console.log('[Case Detail] Saving service:', {
-        serviceName: georgianName,
-        price: serviceBasePrice,
-        discount_percent: serviceDiscountPercent,
-      });
+      console.log('[Case Detail] Saving service - FULL SERVICE OBJECT:', JSON.stringify(updatedServices[editingServiceIndex], null, 2));
+      console.log('[Case Detail] ALL SERVICES TO SAVE:', JSON.stringify(updatedServices, null, 2));
 
       // Calculate new total with individual service discounts and global discounts
       const servicesSubtotal = updatedServices.reduce((sum, s) => {

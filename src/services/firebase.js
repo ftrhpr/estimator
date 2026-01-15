@@ -295,7 +295,16 @@ const syncToCPanel = async (inspectionId, updates, cpanelInvoiceId, docRef) => {
       
       // Log services data if present
       if (cpanelUpdates.services) {
-        console.log('[Firebase] Services being sent to cPanel:', JSON.stringify(cpanelUpdates.services, null, 2));
+        console.log('[Firebase] Services count:', cpanelUpdates.services.length);
+        cpanelUpdates.services.forEach((s, i) => {
+          console.log(`[Firebase] Service ${i}:`, {
+            serviceName: s.serviceName,
+            serviceNameKa: s.serviceNameKa,
+            name: s.name,
+            nameKa: s.nameKa,
+            price: s.price,
+          });
+        });
       }
       
       const result = await updateInvoiceToCPanel(cpanelId, cpanelUpdates);
