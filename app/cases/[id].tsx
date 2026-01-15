@@ -2,32 +2,32 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    Dimensions,
-    Image,
-    Linking,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  Dimensions,
+  Image,
+  Linking,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { GestureHandlerRootView, PinchGestureHandler, State } from 'react-native-gesture-handler';
 import {
-    ActivityIndicator,
-    Button,
-    Card,
-    Divider,
-    IconButton,
-    Portal,
-    Surface,
-    Text,
-    TextInput
+  ActivityIndicator,
+  Button,
+  Card,
+  Divider,
+  IconButton,
+  Portal,
+  Surface,
+  Text,
+  TextInput
 } from 'react-native-paper';
 import Reanimated, {
-    useSharedValue,
-    withSpring
+  useSharedValue,
+  withSpring
 } from 'react-native-reanimated';
 
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
@@ -77,6 +77,12 @@ export default function CaseDetailScreen() {
   // Parts state
   const [caseParts, setCaseParts] = useState<any[]>([]);
 
+  // Discounts state
+  const [servicesDiscount, setServicesDiscount] = useState('0');
+  const [partsDiscount, setPartsDiscount] = useState('0');
+  const [globalDiscount, setGlobalDiscount] = useState('0');
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+
   // Animation values
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -122,6 +128,60 @@ export default function CaseDetailScreen() {
       const normalized = normalizeService(s);
       return sum + (normalized.count || 1);
     }, 0) || 0;
+  };
+
+  // Discount calculation functions
+  const getServicesSubtotal = () => {
+    return caseData?.services?.reduce((sum: number, s: any) => {
+      const normalized = normalizeService(s);
+      return sum + (normalized.price || 0);
+    }, 0) || 0;
+  };
+
+  const getPartsSubtotal = () => {
+    return caseParts?.reduce((sum: number, p: any) => 
+      sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0) || 0;
+  };
+
+  const getServicesTotal = () => {
+    const subtotal = getServicesSubtotal();
+    const discount = (parseFloat(servicesDiscount) || 0) / 100;
+    return Math.max(0, subtotal - (subtotal * discount));
+  };
+
+  const getPartsTotal = () => {
+    const subtotal = getPartsSubtotal();
+    const discount = (parseFloat(partsDiscount) || 0) / 100;
+    return Math.max(0, subtotal - (subtotal * discount));
+  };
+
+  const getGrandTotal = () => {
+    const subtotal = getServicesTotal() + getPartsTotal();
+    const discount = (parseFloat(globalDiscount) || 0) / 100;
+    return Math.max(0, subtotal - (subtotal * discount));
+  };
+
+  const handleSaveDiscounts = async () => {
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      
+      const discountData = {
+        services_discount_percent: parseFloat(servicesDiscount) || 0,
+        parts_discount_percent: parseFloat(partsDiscount) || 0,
+        global_discount_percent: parseFloat(globalDiscount) || 0,
+        totalPrice: getGrandTotal(),
+      };
+
+      await updateInspection(id as string, discountData, cpanelId || undefined);
+
+      setCaseData({ ...caseData, ...discountData });
+      setShowDiscountModal(false);
+      Alert.alert('✅ Success', 'Discounts updated successfully');
+    } catch (error) {
+      console.error('Error saving discounts:', error);
+      Alert.alert('❌ Error', 'Failed to save discounts');
+    }
   };
 
   const getCPanelInvoiceId = async (): Promise<string | null> => {
@@ -225,6 +285,10 @@ export default function CaseDetailScreen() {
         setEditedCarMakeId(data.carMakeId || '');
         setEditedCarModelId(data.carModelId || '');
         setEditedPlate(data.plate || '');
+        // Load discounts
+        setServicesDiscount(String(data.services_discount_percent || 0));
+        setPartsDiscount(String(data.parts_discount_percent || 0));
+        setGlobalDiscount(String(data.global_discount_percent || 0));
         if (data.cpanelInvoiceId) {
           setCpanelInvoiceId(data.cpanelInvoiceId);
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
@@ -1055,6 +1119,75 @@ export default function CaseDetailScreen() {
             </Card>
           )}
 
+          {/* Discounts & Totals Card */}
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: COLORS.success + '15' }]}>
+                    <MaterialCommunityIcons name="percent" size={20} color={COLORS.success} />
+                  </View>
+                  <Text style={styles.cardTitle}>ფასდაკლებები და ჯამი</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowDiscountModal(true)}
+                  style={styles.editIconButton}
+                >
+                  <MaterialCommunityIcons name="pencil-circle" size={28} color={COLORS.primary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Subtotals */}
+              <View style={styles.discountSummarySection}>
+                <View style={styles.discountSummaryRow}>
+                  <Text style={styles.discountSummaryLabel}>სერვისები:</Text>
+                  <Text style={styles.discountSummaryValue}>{formatCurrencyGEL(getServicesSubtotal())}</Text>
+                </View>
+                {parseFloat(servicesDiscount) > 0 && (
+                  <View style={styles.discountSummaryRow}>
+                    <Text style={styles.discountAppliedLabel}>↳ ფასდაკლება ({servicesDiscount}%):</Text>
+                    <Text style={styles.discountAppliedValue}>-{formatCurrencyGEL(getServicesSubtotal() * (parseFloat(servicesDiscount) / 100))}</Text>
+                  </View>
+                )}
+
+                <View style={styles.discountSummaryRow}>
+                  <Text style={styles.discountSummaryLabel}>ნაწილები:</Text>
+                  <Text style={styles.discountSummaryValue}>{formatCurrencyGEL(getPartsSubtotal())}</Text>
+                </View>
+                {parseFloat(partsDiscount) > 0 && (
+                  <View style={styles.discountSummaryRow}>
+                    <Text style={styles.discountAppliedLabel}>↳ ფასდაკლება ({partsDiscount}%):</Text>
+                    <Text style={styles.discountAppliedValue}>-{formatCurrencyGEL(getPartsSubtotal() * (parseFloat(partsDiscount) / 100))}</Text>
+                  </View>
+                )}
+
+                {parseFloat(globalDiscount) > 0 && (
+                  <View style={styles.discountSummaryRow}>
+                    <Text style={styles.discountAppliedLabel}>საერთო ფასდაკლება ({globalDiscount}%):</Text>
+                    <Text style={styles.discountAppliedValue}>-{formatCurrencyGEL((getServicesTotal() + getPartsTotal()) * (parseFloat(globalDiscount) / 100))}</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Grand Total */}
+              <View style={styles.grandTotalSection}>
+                <Text style={styles.grandTotalLabel}>საბოლოო ჯამი:</Text>
+                <Text style={styles.grandTotalValue}>{formatCurrencyGEL(getGrandTotal())}</Text>
+              </View>
+
+              {/* Quick Discount Button */}
+              {parseFloat(servicesDiscount) === 0 && parseFloat(partsDiscount) === 0 && parseFloat(globalDiscount) === 0 && (
+                <TouchableOpacity
+                  style={styles.discountButton}
+                  onPress={() => setShowDiscountModal(true)}
+                >
+                  <MaterialCommunityIcons name="tag-plus" size={20} color={COLORS.primary} />
+                  <Text style={styles.discountButtonText}>ფასდაკლების დამატება</Text>
+                </TouchableOpacity>
+              )}
+            </Card.Content>
+          </Card>
+
           {/* Photos with Modern Gallery Layout */}
           {caseData.photos && caseData.photos.length > 0 && (
             <Card style={styles.modernCard}>
@@ -1593,6 +1726,127 @@ export default function CaseDetailScreen() {
             </View>
           )}
           </GestureHandlerRootView>
+        </Modal>
+      </Portal>
+
+      {/* Discount Modal */}
+      <Portal>
+        <Modal
+          visible={showDiscountModal}
+          onDismiss={() => setShowDiscountModal(false)}
+          contentContainerStyle={styles.discountModal}
+        >
+          <View style={styles.discountModalHeader}>
+            <Text style={styles.discountModalTitle}>ფასდაკლებების რედაქტირება</Text>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowDiscountModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.discountModalContent}>
+            {/* Services Discount */}
+            <View style={styles.discountInputGroup}>
+              <Text style={styles.discountInputLabel}>სერვისების ფასდაკლება (%)</Text>
+              <TextInput
+                value={servicesDiscount}
+                onChangeText={setServicesDiscount}
+                mode="outlined"
+                keyboardType="numeric"
+                placeholder="0"
+                style={styles.discountInput}
+                outlineStyle={styles.enhancedInputOutline}
+                activeOutlineColor={COLORS.primary}
+                right={<TextInput.Affix text="%" />}
+              />
+              {parseFloat(servicesDiscount) > 0 && (
+                <Text style={styles.discountAmountPreview}>
+                  -{formatCurrencyGEL(getServicesSubtotal() * (parseFloat(servicesDiscount) / 100))}
+                </Text>
+              )}
+            </View>
+
+            {/* Parts Discount */}
+            <View style={styles.discountInputGroup}>
+              <Text style={styles.discountInputLabel}>ნაწილების ფასდაკლება (%)</Text>
+              <TextInput
+                value={partsDiscount}
+                onChangeText={setPartsDiscount}
+                mode="outlined"
+                keyboardType="numeric"
+                placeholder="0"
+                style={styles.discountInput}
+                outlineStyle={styles.enhancedInputOutline}
+                activeOutlineColor={COLORS.primary}
+                right={<TextInput.Affix text="%" />}
+              />
+              {parseFloat(partsDiscount) > 0 && (
+                <Text style={styles.discountAmountPreview}>
+                  -{formatCurrencyGEL(getPartsSubtotal() * (parseFloat(partsDiscount) / 100))}
+                </Text>
+              )}
+            </View>
+
+            {/* Global Discount */}
+            <View style={styles.discountInputGroup}>
+              <Text style={styles.discountInputLabel}>საერთო ფასდაკლება (%)</Text>
+              <TextInput
+                value={globalDiscount}
+                onChangeText={setGlobalDiscount}
+                mode="outlined"
+                keyboardType="numeric"
+                placeholder="0"
+                style={styles.discountInput}
+                outlineStyle={styles.enhancedInputOutline}
+                activeOutlineColor={COLORS.primary}
+                right={<TextInput.Affix text="%" />}
+              />
+              {parseFloat(globalDiscount) > 0 && (
+                <Text style={styles.discountAmountPreview}>
+                  -{formatCurrencyGEL((getServicesTotal() + getPartsTotal()) * (parseFloat(globalDiscount) / 100))}
+                </Text>
+              )}
+            </View>
+
+            {/* Totals Preview */}
+            <View style={styles.discountTotalsCard}>
+              <View style={styles.discountTotalRow}>
+                <Text style={styles.discountTotalLabel}>სერვისები (ფასდაკლებით):</Text>
+                <Text style={styles.discountTotalValue}>{formatCurrencyGEL(getServicesTotal())}</Text>
+              </View>
+              <View style={styles.discountTotalRow}>
+                <Text style={styles.discountTotalLabel}>ნაწილები (ფასდაკლებით):</Text>
+                <Text style={styles.discountTotalValue}>{formatCurrencyGEL(getPartsTotal())}</Text>
+              </View>
+              <View style={[styles.discountTotalRow, styles.discountGrandTotal]}>
+                <Text style={styles.discountGrandTotalLabel}>საბოლოო ჯამი:</Text>
+                <Text style={styles.discountGrandTotalValue}>{formatCurrencyGEL(getGrandTotal())}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.discountModalActions}>
+            <Button
+              mode="outlined"
+              onPress={() => setShowDiscountModal(false)}
+              style={styles.cancelButton}
+              labelStyle={styles.cancelButtonLabel}
+            >
+              გაუქმება
+            </Button>
+            <Button
+              mode="contained"
+              onPress={handleSaveDiscounts}
+              style={styles.saveButton}
+              labelStyle={styles.saveButtonLabel}
+              buttonColor={COLORS.primary}
+              icon="check"
+            >
+              შენახვა
+            </Button>
+          </View>
         </Modal>
       </Portal>
     </View>
@@ -2514,6 +2768,167 @@ const styles = StyleSheet.create({
   subtotalValue: {
     fontSize: 16,
     fontWeight: '700',
+    color: COLORS.primary,
+  },
+  // Discount Modal Styles
+  discountModal: {
+    margin: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '85%',
+  },
+  discountModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  discountModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  discountModalContent: {
+    gap: 16,
+  },
+  discountInputGroup: {
+    gap: 6,
+  },
+  discountInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  discountInput: {
+    backgroundColor: '#fff',
+  },
+  discountAmountPreview: {
+    fontSize: 13,
+    color: COLORS.success,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  discountTotalsCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 16,
+    marginTop: 8,
+    gap: 10,
+  },
+  discountTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  discountTotalLabel: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  discountTotalValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  discountGrandTotal: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  discountGrandTotalLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  discountGrandTotalValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  discountModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  // Discount Button Style
+  discountButtonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  discountButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.primary + '10',
+    borderRadius: 12,
+    gap: 8,
+  },
+  discountButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  discountBadge: {
+    backgroundColor: COLORS.success,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  discountBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  // Discount Summary Section (in Card)
+  discountSummarySection: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  discountSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  discountSummaryLabel: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  discountSummaryValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  discountAppliedLabel: {
+    fontSize: 13,
+    color: COLORS.success,
+    paddingLeft: 12,
+  },
+  discountAppliedValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.success,
+  },
+  grandTotalSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 16,
+    borderTopWidth: 1.5,
+    borderTopColor: COLORS.primary + '30',
+  },
+  grandTotalLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  grandTotalValue: {
+    fontSize: 22,
+    fontWeight: '800',
     color: COLORS.primary,
   },
 });
