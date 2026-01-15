@@ -9,6 +9,7 @@ import {
   Linking,
   Modal,
   ScrollView,
+  Share,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -409,6 +410,35 @@ export default function CaseDetailScreen() {
       Alert.alert('❌ Error', 'Failed to load case details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSharePublicLink = async () => {
+    if (!caseData) return;
+    
+    // Get the cPanel invoice ID
+    const invoiceId = cpanelInvoiceId || (await getCPanelInvoiceId());
+    
+    if (!invoiceId) {
+      Alert.alert('❌ Error', 'Invoice has not been synced to portal yet. Please try syncing first.');
+      return;
+    }
+    
+    const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?id=${invoiceId}`;
+    
+    try {
+      const result = await Share.share({
+        message: `📋 Invoice for ${caseData.customerName || 'Customer'}\n🚗 ${caseData.plate || caseData.carModel || 'Vehicle'}\n💰 Total: ${formatCurrencyGEL(caseData.totalPrice)}\n\n🔗 View invoice: ${publicUrl}`,
+        url: publicUrl, // iOS only
+        title: `Invoice #${id.toString().slice(0, 8).toUpperCase()}`,
+      });
+      
+      if (result.action === Share.sharedAction) {
+        console.log('[Case Detail] Invoice link shared successfully');
+      }
+    } catch (error: any) {
+      console.error('Error sharing link:', error);
+      Alert.alert('❌ Error', 'Failed to share link');
     }
   };
 
@@ -854,6 +884,16 @@ export default function CaseDetailScreen() {
             <Text style={styles.headerSubtitle}>#{id.toString().slice(0, 8).toUpperCase()}</Text>
           </View>
           <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={handleSharePublicLink}
+              style={styles.shareButton}
+            >
+              <MaterialCommunityIcons
+                name="share-variant"
+                size={20}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={handleSyncFromCPanel}
               disabled={syncing}
@@ -2115,6 +2155,15 @@ const styles = StyleSheet.create({
   },
   syncButtonDisabled: {
     backgroundColor: COLORS.background,
+  },
+  shareButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: COLORS.success + '15',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
 
   scrollView: {
