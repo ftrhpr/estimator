@@ -34,7 +34,7 @@ import Reanimated, {
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
-import { fetchCPanelInvoiceId } from '../../src/services/cpanelService';
+import { fetchInvoiceFromCPanel } from '../../src/services/cpanelService';
 import { ServiceService } from '../../src/services/serviceService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
@@ -429,20 +429,8 @@ export default function CaseDetailScreen() {
     }
 
     try {
-      // Fetch invoice data to get the slug
-      const invoiceData = await fetchCPanelInvoiceId(invoiceId);
-      const slug = invoiceData?.slug;
-
-      if (!slug) {
-        Alert.alert('❌ Error', 'Slug not found for this invoice.');
-        return;
-      }
-
-      const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?slug=${slug}`;
-
-      const result = await Share.share({
-        message: `📋 Invoice for ${caseData.customerName || 'Customer'}\n🚗 ${caseData.plate || caseData.carModel || 'Vehicle'}\n💰 Total: ${formatCurrencyGEL(caseData.totalPrice)}\n\n🔗 View invoice: ${publicUrl}`,
-        url: publicUrl, // iOS only
+      // Fetch full invoice data to get the slug
+      const invoiceData = await fetchInvoiceFromCPanel(invoiceId);
         title: `Invoice #${id.toString().slice(0, 8).toUpperCase()}`,
       });
 

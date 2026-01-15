@@ -29,7 +29,7 @@ import {
 
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
-import { fetchCPanelInvoiceId } from '../../src/services/cpanelService';
+import { fetchInvoiceFromCPanel } from '../../src/services/cpanelService';
 import { getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
@@ -202,8 +202,8 @@ export default function CasesScreen() {
     }
 
     try {
-      // Fetch invoice data to get the slug
-      const invoiceData = await fetchCPanelInvoiceId(item.cpanelInvoiceId);
+      // Fetch full invoice data to get the slug
+      const invoiceData = await fetchInvoiceFromCPanel(item.cpanelInvoiceId);
       const slug = invoiceData?.slug;
 
       if (!slug) {
@@ -213,11 +213,6 @@ export default function CasesScreen() {
 
       const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?slug=${slug}`;
 
-      await Share.share({
-        message: `📋 ინვოისი: ${item.customerName || 'მომხმარებელი'}\n🚗 ${item.plate || item.carModel || 'ავტომობილი'}\n💰 ჯამი: ${formatCurrencyGEL(item.totalPrice)}\n\n🔗 ლინკი: ${publicUrl}`,
-        url: publicUrl,
-        title: `ინვოისი #${item.id.slice(0, 8).toUpperCase()}`,
-      });
     } catch (error: any) {
       console.error('Error sharing link:', error);
       Alert.alert('❌ შეცდომა', 'ლინკის გაზიარება ვერ მოხერხდა');
