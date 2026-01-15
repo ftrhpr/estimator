@@ -53,8 +53,8 @@ try {
     }
     
     $parts = [];
-    if (!empty($invoice['parts'])) {
-        $parts = json_decode($invoice['parts'], true) ?? [];
+    if (!empty($invoice['repair_parts'])) {
+        $parts = json_decode($invoice['repair_parts'], true) ?? [];
     }
     
     // Transform repair_labor back to app format

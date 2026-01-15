@@ -60,6 +60,7 @@ export interface Service {
   category: 'bodywork' | 'painting' | 'mechanical' | 'specialized' | 'finishing';
   isActive: boolean;
   isDefault: boolean;
+  sortOrder: number;
   createdAt: Date;
   updatedAt: Date;
 }

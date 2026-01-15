@@ -45,6 +45,7 @@ try {
     
     // Prepare INSERT query - Mapped to your actual database structure
     // Note: services/labors are stored as JSON in repair_labor column
+    // Note: parts are stored as JSON in repair_parts column
     $sql = "INSERT INTO transfers (
         plate,
         vehicle_make,
@@ -53,7 +54,7 @@ try {
         phone,
         amount,
         status,
-        parts,
+        repair_parts,
         repair_labor,
         case_images,
         serviceDate,
@@ -70,7 +71,7 @@ try {
         :phone,
         :amount,
         :status,
-        :parts,
+        :repair_parts,
         :repair_labor,
         :case_images,
         :serviceDate,
@@ -87,9 +88,35 @@ try {
     $systemLogsJson = null;
     
     // Prepare parts JSON if exists
+    // App sends parts array: [{"name":"Bumper","nameKa":"ბამპერი","partNumber":"OEM-123","quantity":1,"unitPrice":150,"totalPrice":150}]
     $partsJson = null;
     if (isset($data['parts']) && !empty($data['parts'])) {
-        $partsJson = json_encode($data['parts'], JSON_UNESCAPED_UNICODE);
+        $parts = $data['parts'];
+        error_log("Raw parts received: " . json_encode($parts));
+        
+        // Transform parts to match database expectations
+        $transformedParts = array_map(function($part) {
+            // Prefer Georgian name, fallback to English
+            $partName = !empty($part['nameKa']) ? $part['nameKa'] : 
+                       (!empty($part['name']) ? $part['name'] : 'Unnamed Part');
+            
+            $quantity = !empty($part['quantity']) ? intval($part['quantity']) : 1;
+            $unitPrice = !empty($part['unitPrice']) ? floatval($part['unitPrice']) : 0;
+            $totalPrice = !empty($part['totalPrice']) ? floatval($part['totalPrice']) : ($quantity * $unitPrice);
+            
+            return [
+                'name' => $partName,
+                'name_en' => !empty($part['name']) ? $part['name'] : $partName,
+                'part_number' => !empty($part['partNumber']) ? $part['partNumber'] : '',
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                'total_price' => $totalPrice,
+                'notes' => !empty($part['notes']) ? $part['notes'] : '',
+            ];
+        }, $parts);
+        
+        $partsJson = json_encode($transformedParts, JSON_UNESCAPED_UNICODE);
+        error_log("Parts transformed: " . $partsJson);
     }
     
     // Prepare services/labors JSON from the services array
@@ -107,6 +134,12 @@ try {
                           (!empty($service['serviceName']) ? $service['serviceName'] :
                           (!empty($service['name']) ? $service['name'] : 'Unnamed Labor')));
             $servicePrice = !empty($service['price']) ? $service['price'] : (!empty($service['hourly_rate']) ? $service['hourly_rate'] : (!empty($service['rate']) ? $service['rate'] : 0));
+            
+            // Get count/hours
+            $serviceCount = !empty($service['hours']) ? $service['hours'] : (!empty($service['count']) ? $service['count'] : 1);
+            
+            // Calculate unit rate (price per item)
+            $unitRate = $serviceCount > 0 ? ($servicePrice / $serviceCount) : $servicePrice;
 
             // Preserve service description as notes if available
             $serviceDescription = !empty($service['description']) ? $service['description'] : '';
@@ -119,10 +152,10 @@ try {
             return [
                 'name' => $serviceName,
                 'description' => $serviceDescription,
-                'hours' => !empty($service['hours']) ? $service['hours'] : (!empty($service['count']) ? $service['count'] : 1),
-                'rate' => $servicePrice,
-                'hourly_rate' => $servicePrice,
-                'price' => $servicePrice,
+                'hours' => $serviceCount,
+                'rate' => $unitRate,
+                'hourly_rate' => $unitRate,
+                'price' => $servicePrice, // Total price (unit rate * count)
                 'billable' => isset($service['billable']) ? $service['billable'] : true,
                 'notes' => $combinedNotes,
             ];
@@ -217,7 +250,7 @@ try {
         ':phone' => $data['customerPhone'] ?? '',     // customerPhone -> phone
         ':amount' => $data['totalPrice'] ?? 0,        // totalPrice -> amount
         ':status' => 'Processing',                    // Default status - Processing
-        ':parts' => $partsJson,                       // parts JSON (damage tags)
+        ':repair_parts' => $partsJson,                // repair_parts JSON (car parts)
         ':repair_labor' => $servicesJson,             // repair_labor JSON (services with hours and hourly_rate)
         ':case_images' => $imagesJson,                // case_images JSON (Firebase Storage URLs)
         ':serviceDate' => $serviceDate,               // Service date (datetime)

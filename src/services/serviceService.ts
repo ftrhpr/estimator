@@ -63,6 +63,26 @@ export class ServiceService {
     }
   }
 
+  static async updateServiceByKey(key: string, updates: Partial<Service>): Promise<void> {
+    try {
+      const q = query(collection(db, this.COLLECTION_NAME), where('key', '==', key));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        throw new Error(`Service with key '${key}' not found`);
+      }
+
+      const serviceDoc = querySnapshot.docs[0];
+      await updateDoc(serviceDoc.ref, {
+        ...updates,
+        updatedAt: new Date(),
+      });
+    } catch (error) {
+      console.error('Error updating service by key:', error);
+      throw error;
+    }
+  }
+
   static async deleteService(id: string): Promise<void> {
     try {
       // Check if it's a default service first
@@ -105,7 +125,17 @@ export class ServiceService {
           ...doc.data(),
         }) as Service[])
         .filter(service => service.isActive)
-        .sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+        .sort((a, b) => {
+          // Sort by sortOrder if both have it
+          if (typeof a.sortOrder === 'number' && typeof b.sortOrder === 'number') {
+            return a.sortOrder - b.sortOrder;
+          }
+          // If only one has sortOrder, it comes first
+          if (typeof a.sortOrder === 'number') return -1;
+          if (typeof b.sortOrder === 'number') return 1;
+          // Otherwise sort by name
+          return a.nameEn.localeCompare(b.nameEn);
+        });
     } catch (error) {
       console.error('Error getting services:', error);
       throw error;

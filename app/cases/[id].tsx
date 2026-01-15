@@ -74,6 +74,9 @@ export default function CaseDetailScreen() {
   const [editServicePrice, setEditServicePrice] = useState('');
   const [editServiceCount, setEditServiceCount] = useState('1');
 
+  // Parts state
+  const [caseParts, setCaseParts] = useState<any[]>([]);
+
   // Animation values
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -169,6 +172,7 @@ export default function CaseDetailScreen() {
         totalPrice: cpanelData.totalPrice || caseData.totalPrice,
         status: cpanelData.status || caseData.status,
         services: cpanelData.services || caseData.services,
+        parts: cpanelData.parts || caseData.parts,
       };
 
       const { updateInspection } = require('../../src/services/firebase');
@@ -180,10 +184,12 @@ export default function CaseDetailScreen() {
         totalPrice: updatedData.totalPrice,
         status: updatedData.status,
         services: updatedData.services,
+        parts: updatedData.parts,
       });
 
       setCaseData(updatedData);
       setEditedServices(updatedData.services || []);
+      setCaseParts(updatedData.parts || []);
       setEditedCustomerName(updatedData.customerName || '');
       setEditedCustomerPhone(updatedData.customerPhone || '');
       setEditedCarModel(updatedData.carModel || '');
@@ -211,6 +217,7 @@ export default function CaseDetailScreen() {
         const data = { id: docSnap.id, ...docSnap.data() };
         setCaseData(data);
         setEditedServices(data.services || []);
+        setCaseParts(data.parts || []);
         setEditedCustomerName(data.customerName || '');
         setEditedCustomerPhone(data.customerPhone || '');
         setEditedCarMake(data.carMake || '');
@@ -989,6 +996,64 @@ export default function CaseDetailScreen() {
               )}
             </Card.Content>
           </Card>
+
+          {/* Parts Card */}
+          {caseParts && caseParts.length > 0 && (
+            <Card style={styles.modernCard}>
+              <Card.Content style={styles.cardContent}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardHeaderLeft}>
+                    <View style={[styles.iconCircle, { backgroundColor: COLORS.accent + '15' }]}>
+                      <MaterialCommunityIcons name="car-cog" size={20} color={COLORS.accent} />
+                    </View>
+                    <Text style={styles.cardTitle}>ნაწილები ({caseParts.length})</Text>
+                  </View>
+                </View>
+
+                <View style={styles.servicesList}>
+                  {caseParts.map((part: any, index: number) => (
+                    <View key={part.id || `part-${index}`}>
+                      <View style={styles.modernServiceRow}>
+                        <View style={styles.serviceLeft}>
+                          <View style={[styles.serviceIconSmall, { backgroundColor: COLORS.accent + '15' }]}>
+                            <MaterialCommunityIcons name="cog" size={16} color={COLORS.accent} />
+                          </View>
+                          <View style={styles.serviceTextContainer}>
+                            <View style={styles.serviceNameRow}>
+                              <Text style={styles.modernServiceName}>
+                                {part.nameKa || part.name || 'ნაწილი'}
+                              </Text>
+                              {(part.quantity || 1) > 1 && (
+                                <View style={styles.countBadge}>
+                                  <Text style={styles.countBadgeText}>x{part.quantity || 1}</Text>
+                                </View>
+                              )}
+                            </View>
+                            {part.partNumber && (
+                              <Text style={styles.serviceDescription}>#{part.partNumber}</Text>
+                            )}
+                            {part.notes && (
+                              <Text style={styles.serviceDescription}>{part.notes}</Text>
+                            )}
+                          </View>
+                        </View>
+                        <Text style={styles.modernServicePrice}>{formatCurrencyGEL(part.totalPrice || (part.unitPrice * (part.quantity || 1)))}</Text>
+                      </View>
+                      {index < caseParts.length - 1 && <Divider style={styles.modernDivider} />}
+                    </View>
+                  ))}
+                </View>
+
+                {/* Parts Total */}
+                <View style={styles.servicesSubtotal}>
+                  <Text style={styles.subtotalLabel}>ნაწილების ჯამი:</Text>
+                  <Text style={styles.subtotalValue}>
+                    {formatCurrencyGEL(caseParts.reduce((sum: number, p: any) => sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0))}
+                  </Text>
+                </View>
+              </Card.Content>
+            </Card>
+          )}
 
           {/* Photos with Modern Gallery Layout */}
           {caseData.photos && caseData.photos.length > 0 && (
@@ -2430,5 +2495,25 @@ const styles = StyleSheet.create({
   },
   halfInput: {
     flex: 1,
+  },
+  // Parts subtotal styles
+  servicesSubtotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 16,
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  subtotalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  subtotalValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
 });

@@ -53,7 +53,7 @@ try {
         'repair_status' => 'repair_status',
         'user_response' => 'user_response',
         'services' => 'repair_labor',
-        'parts' => 'parts',
+        'parts' => 'repair_parts',
         'images' => 'case_images',
         'photos' => 'case_images',
         'imageUrls' => 'case_images',
@@ -82,7 +82,7 @@ try {
             $value = $data[$appField];
             
             // Handle JSON fields
-            if (in_array($dbField, ['repair_labor', 'parts', 'case_images'])) {
+            if (in_array($dbField, ['repair_labor', 'repair_parts', 'case_images'])) {
                 if (is_array($value)) {
                     // Transform services to match portal format (same as create-invoice.php)
                     if ($dbField === 'repair_labor') {
@@ -93,6 +93,12 @@ try {
                                           (!empty($service['serviceName']) ? $service['serviceName'] :
                                           (!empty($service['name']) ? $service['name'] : 'Unnamed Labor')));
                             $servicePrice = !empty($service['price']) ? $service['price'] : (!empty($service['hourly_rate']) ? $service['hourly_rate'] : (!empty($service['rate']) ? $service['rate'] : 0));
+                            
+                            // Get count/hours
+                            $serviceCount = !empty($service['hours']) ? $service['hours'] : (!empty($service['count']) ? $service['count'] : 1);
+                            
+                            // Calculate unit rate (price per item)
+                            $unitRate = $serviceCount > 0 ? ($servicePrice / $serviceCount) : $servicePrice;
 
                             // Preserve service description as notes if available
                             $serviceDescription = !empty($service['description']) ? $service['description'] : '';
@@ -105,16 +111,39 @@ try {
                             return [
                                 'name' => $serviceName,
                                 'description' => $serviceDescription,
-                                'hours' => !empty($service['hours']) ? $service['hours'] : (!empty($service['count']) ? $service['count'] : 1),
-                                'rate' => $servicePrice,
-                                'hourly_rate' => $servicePrice,
-                                'price' => $servicePrice,
+                                'hours' => $serviceCount,
+                                'rate' => $unitRate,
+                                'hourly_rate' => $unitRate,
+                                'price' => $servicePrice, // Total price (unit rate * count)
                                 'billable' => isset($service['billable']) ? $service['billable'] : true,
                                 'notes' => $combinedNotes,
                             ];
                         }, $value);
                         $value = json_encode($transformedServices, JSON_UNESCAPED_UNICODE);
                         error_log("Services transformed for update: " . $value);
+                    } elseif ($dbField === 'repair_parts') {
+                        // Transform parts to match database expectations (same as create-invoice.php)
+                        $transformedParts = array_map(function($part) {
+                            // Prefer Georgian name, fallback to English
+                            $partName = !empty($part['nameKa']) ? $part['nameKa'] : 
+                                       (!empty($part['name']) ? $part['name'] : 'Unnamed Part');
+                            
+                            $quantity = !empty($part['quantity']) ? intval($part['quantity']) : 1;
+                            $unitPrice = !empty($part['unitPrice']) ? floatval($part['unitPrice']) : 0;
+                            $totalPrice = !empty($part['totalPrice']) ? floatval($part['totalPrice']) : ($quantity * $unitPrice);
+                            
+                            return [
+                                'name' => $partName,
+                                'name_en' => !empty($part['name']) ? $part['name'] : $partName,
+                                'part_number' => !empty($part['partNumber']) ? $part['partNumber'] : '',
+                                'quantity' => $quantity,
+                                'unit_price' => $unitPrice,
+                                'total_price' => $totalPrice,
+                                'notes' => !empty($part['notes']) ? $part['notes'] : '',
+                            ];
+                        }, $value);
+                        $value = json_encode($transformedParts, JSON_UNESCAPED_UNICODE);
+                        error_log("Parts transformed for update: " . $value);
                     } elseif ($dbField === 'case_images') {
                         // Normalize images with tagging info - extract URLs and tags
                         $imageUrls = [];

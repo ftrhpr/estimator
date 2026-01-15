@@ -1,28 +1,29 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  StyleSheet,
-  TouchableOpacity,
-  View,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    PanResponder,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import {
-  Appbar,
-  Button,
-  List,
-  Modal,
-  Portal,
-  Text,
-  TextInput
+    Appbar,
+    Button,
+    Modal,
+    Portal,
+    Text,
+    TextInput
 } from 'react-native-paper';
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring
 } from 'react-native-reanimated';
 
 import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
@@ -62,6 +63,7 @@ interface ServiceOption {
   category: string;
   icon: string;
   description?: string;
+  sortOrder?: number;
 }
 
 const SERVICE_ICONS: Record<string, string> = {
@@ -88,6 +90,17 @@ export default function PhotoTaggingScreen() {
   const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
   const [actualImageSize, setActualImageSize] = useState({ width: 0, height: 0 });
   const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
+  const [showCustomServiceModal, setShowCustomServiceModal] = useState(false);
+  const [customServiceName, setCustomServiceName] = useState('');
+  const [customServiceNameKa, setCustomServiceNameKa] = useState('');
+  const [customServicePrice, setCustomServicePrice] = useState('');
+  const [savingCustomService, setSavingCustomService] = useState(false);
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [draggingTagId, setDraggingTagId] = useState<string | null>(null);
+  const dragStartPos = useRef({ x: 0, y: 0, pageX: 0, pageY: 0 });
+  const tagPanResponders = useRef<Record<string, any>>({});
+  const [serviceOrder, setServiceOrder] = useState<ServiceOption[]>([]);
 
   const priceScale = useSharedValue(1);
   const priceOpacity = useSharedValue(1);
@@ -95,7 +108,25 @@ export default function PhotoTaggingScreen() {
   // Load services from database
   React.useEffect(() => {
     loadServicesFromDB();
+    setSortOrder(); // Set manual sort order
   }, []);
+
+  // Clear pan responders when changing photos
+  React.useEffect(() => {
+    tagPanResponders.current = {};
+  }, [currentPhotoIndex]);
+
+  // Clear service state when modal opens/closes
+  React.useEffect(() => {
+    if (!showServiceMenu) {
+      setServiceOrder([]);
+    } else {
+      // Initialize serviceOrder with current services when modal opens
+      if (services.length > 0 && serviceOrder.length === 0) {
+        setServiceOrder([...services]);
+      }
+    }
+  }, [showServiceMenu]);
 
   const loadServicesFromDB = async () => {
     try {
@@ -242,10 +273,134 @@ export default function PhotoTaggingScreen() {
     setShowServiceMenu(false);
   };
 
+  const saveServiceOrder = async (orderedServices: ServiceOption[]) => {
+    try {
+      const updates = orderedServices.map((service, index) => ({
+        serviceKey: service.key,
+        sortOrder: index,
+      }));
+
+      for (const update of updates) {
+        await ServiceService.updateServiceByKey(update.serviceKey, { sortOrder: update.sortOrder });
+      }
+      console.log('Service order saved successfully');
+    } catch (error) {
+      console.error('Error saving service order:', error);
+      Alert.alert('Error', 'Failed to save service order');
+    }
+  };
+
+  // Manual service order (Georgian name order as specified)
+  const MANUAL_SERVICE_ORDER = {
+    'painting': 0,              // სამღებრო სამუშაო
+    'paint_mixing': 1,          // საღებავის შეზავება
+    'disassembly_assembly': 2,  // დაშლა აწყობა
+    'dent_repair': 3,           // თუნუქის გასწორება
+    'polishing': 4,             // პოლირება
+    'robotic_work': 5,          // სარობოტე სამუშაო
+  };
+
+  const setSortOrder = async () => {
+    try {
+      for (const [key, sortOrder] of Object.entries(MANUAL_SERVICE_ORDER)) {
+        await ServiceService.updateServiceByKey(key, { sortOrder });
+      }
+      console.log('Service order set successfully');
+    } catch (error) {
+      console.error('Error setting service order:', error);
+    }
+  };
+
   const handleTagPress = (tag: PhotoTag) => {
     setEditingTag(tag);
     setTempPrice(tag.price);
     setPriceAdjustmentVisible(true);
+  };
+
+  const createPanResponder = (tagId: string) => {
+    if (tagPanResponders.current[tagId]) {
+      return tagPanResponders.current[tagId];
+    }
+
+    let isMoving = false;
+    let startTime = 0;
+
+    const responder = PanResponder.create({
+      // Don't capture on start - allow TouchableOpacity to handle taps
+      onStartShouldSetPanResponder: () => false,
+      // Only capture when there's significant movement (drag)
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        const { dx, dy } = gestureState;
+        // Only become responder if moved more than 5 pixels (actual drag)
+        return Math.abs(dx) > 5 || Math.abs(dy) > 5;
+      },
+      onPanResponderGrant: (event) => {
+        isMoving = true;
+        startTime = Date.now();
+        // Store initial tag coordinates
+        const currentPhoto = photos[currentPhotoIndex];
+        const currentTag = currentPhoto?.tags.find(t => t.id === tagId);
+        if (currentTag) {
+          dragStartPos.current = { 
+            x: currentTag.x, 
+            y: currentTag.y,
+            pageX: event.nativeEvent.pageX,
+            pageY: event.nativeEvent.pageY,
+          };
+          setDraggingTagId(tagId);
+        }
+      },
+      onPanResponderMove: (event) => {
+        const { pageX, pageY } = event.nativeEvent;
+        const currentPhoto = photos[currentPhotoIndex];
+        const currentTag = currentPhoto?.tags.find(t => t.id === tagId);
+        
+        if (!currentTag || !dragStartPos.current.pageX) return;
+
+        // Calculate delta in page coordinates
+        const deltaX = pageX - dragStartPos.current.pageX;
+        const deltaY = pageY - dragStartPos.current.pageY;
+        
+        // Apply delta to stored starting position
+        let newX = dragStartPos.current.x + deltaX;
+        let newY = dragStartPos.current.y + deltaY;
+        
+        // Clamp to image bounds
+        newX = Math.max(0, Math.min(newX, imageLayout.width - 24));
+        newY = Math.max(0, Math.min(newY, imageLayout.height - 24));
+
+        setPhotos(prev => prev.map((photo, index) =>
+          index === currentPhotoIndex
+            ? {
+                ...photo,
+                tags: photo.tags.map(tag => {
+                  if (tag.id === tagId) {
+                    return {
+                      ...tag,
+                      x: newX,
+                      y: newY,
+                      xPercent: imageLayout.width > 0 ? newX / imageLayout.width : tag.xPercent,
+                      yPercent: imageLayout.height > 0 ? newY / imageLayout.height : tag.yPercent,
+                    };
+                  }
+                  return tag;
+                })
+              }
+            : photo
+        ));
+      },
+      onPanResponderRelease: () => {
+        setDraggingTagId(null);
+        dragStartPos.current = { x: 0, y: 0, pageX: 0, pageY: 0 };
+      },
+      onPanResponderTerminate: () => {
+        setDraggingTagId(null);
+        dragStartPos.current = { x: 0, y: 0, pageX: 0, pageY: 0 };
+      },
+    });
+
+    tagPanResponders.current[tagId] = responder;
+    return responder;
   };
 
   const adjustPrice = (direction: 'up' | 'down') => {
@@ -299,6 +454,71 @@ export default function PhotoTaggingScreen() {
     ));
   };
 
+  const handleSaveCustomService = async () => {
+    // Validate inputs
+    if (!customServiceNameKa.trim()) {
+      Alert.alert('Validation Error', 'Please enter service name in Georgian');
+      return;
+    }
+
+    if (!customServicePrice.trim()) {
+      Alert.alert('Validation Error', 'Please enter service price');
+      return;
+    }
+
+    const price = parseFloat(customServicePrice);
+    if (isNaN(price) || price <= 0) {
+      Alert.alert('Validation Error', 'Please enter a valid price');
+      return;
+    }
+
+    try {
+      setSavingCustomService(true);
+      
+      // Create unique key for the custom service
+      const serviceKey = `custom_${Date.now()}`;
+      
+      // Save to database
+      await ServiceService.createService({
+        key: serviceKey,
+        nameEn: customServiceName.trim() || customServiceNameKa.trim(),
+        nameKa: customServiceNameKa.trim(),
+        basePrice: price,
+        category: 'specialized',
+        isActive: true,
+        sortOrder: services.length,
+      });
+
+      // Add to local services list
+      const newService: ServiceOption = {
+        key: serviceKey,
+        nameEn: customServiceName.trim() || customServiceNameKa.trim(),
+        nameKa: customServiceNameKa.trim(),
+        basePrice: price,
+        category: 'custom',
+        icon: 'plus-circle',
+      };
+
+      setServices(prev => [...prev, newService]);
+
+      // Automatically select the new service
+      handleServiceSelect(newService);
+
+      // Reset form and close modal
+      setCustomServiceName('');
+      setCustomServiceNameKa('');
+      setCustomServicePrice('');
+      setShowCustomServiceModal(false);
+
+      Alert.alert('Success', 'Custom service created and saved to database');
+    } catch (error) {
+      console.error('Error saving custom service:', error);
+      Alert.alert('Error', 'Failed to save custom service. Please try again.');
+    } finally {
+      setSavingCustomService(false);
+    }
+  };
+
   const getTotalEstimate = () => {
     return photos.reduce((total, photo) => 
       total + photo.tags.reduce((photoTotal, tag) => photoTotal + tag.price, 0), 0
@@ -309,26 +529,70 @@ export default function PhotoTaggingScreen() {
     return photos.reduce((count, photo) => count + photo.tags.length, 0);
   };
 
+  const getCategories = () => {
+    const categories = new Set(services.map(s => s.category));
+    return Array.from(categories).sort();
+  };
+
+  const getFilteredAndGroupedServices = () => {
+    let filtered = services;
+
+    // Filter by search query
+    if (serviceSearchQuery.trim()) {
+      const query = serviceSearchQuery.toLowerCase();
+      filtered = filtered.filter(service =>
+        service.nameKa.toLowerCase().includes(query) ||
+        service.nameEn.toLowerCase().includes(query)
+      );
+    }
+
+    // Filter by category
+    if (selectedCategory) {
+      filtered = filtered.filter(service => service.category === selectedCategory);
+    }
+
+    // Sort by sortOrder
+    filtered.sort((a, b) => {
+      const orderA = a.sortOrder ?? 999;
+      const orderB = b.sortOrder ?? 999;
+      return orderA - orderB;
+    });
+
+    // Group by category (but services within each category are already sorted)
+    const grouped: Record<string, ServiceOption[]> = {};
+    filtered.forEach(service => {
+      if (!grouped[service.category]) {
+        grouped[service.category] = [];
+      }
+      grouped[service.category].push(service);
+    });
+
+    return grouped;
+  };
+
   const getGroupedServices = () => {
     const serviceMap: Record<string, { serviceName: string; serviceNameKa: string; totalPrice: number; count: number; serviceKey: string }> = {};
 
     photos.forEach((photo) => {
       photo.tags.forEach((tag) => {
-        if (serviceMap[tag.serviceName]) {
-          serviceMap[tag.serviceName].totalPrice += tag.price;
-          serviceMap[tag.serviceName].count += 1;
+        // Use serviceKey for grouping instead of serviceName to ensure proper matching
+        const key = tag.serviceKey || tag.serviceName;
+        if (serviceMap[key]) {
+          serviceMap[key].totalPrice += tag.price;
+          serviceMap[key].count += 1;
         } else {
-          serviceMap[tag.serviceName] = {
+          serviceMap[key] = {
             serviceName: tag.serviceName,
             serviceNameKa: tag.serviceNameKa,
             totalPrice: tag.price,
             count: 1,
-            serviceKey: tag.serviceKey,
+            serviceKey: tag.serviceKey || tag.serviceName,
           };
         }
       });
     });
 
+    console.log('Grouped services:', Object.values(serviceMap));
     return Object.values(serviceMap);
   };
 
@@ -435,26 +699,38 @@ export default function PhotoTaggingScreen() {
       ? tag.yPercent * displayHeight + offsetY
       : tag.y + offsetY;
 
+    const panResponder = createPanResponder(tag.id);
+    const isDragging = draggingTagId === tag.id;
+
     return (
-      <TouchableOpacity
+      <View
         key={tag.id}
         style={[
           styles.photoTag,
-          { left: displayX - 12, top: displayY - 12 }
+          { 
+            left: displayX - 12, 
+            top: displayY - 12,
+            opacity: isDragging ? 0.8 : 1,
+          }
         ]}
-        onPress={() => handleTagPress(tag)}
-        activeOpacity={0.8}
+        {...panResponder.panHandlers}
       >
-      <View style={styles.tagDot}>
-        <Text style={styles.tagNumber}>{photos[currentPhotoIndex].tags.indexOf(tag) + 1}</Text>
+        <TouchableOpacity
+          style={styles.tagDotContainer}
+          onPress={() => handleTagPress(tag)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.tagDot}>
+            <Text style={styles.tagNumber}>{photos[currentPhotoIndex].tags.indexOf(tag) + 1}</Text>
+          </View>
+          <View style={styles.tagLabel}>
+            <Text style={styles.tagText}>{tag.serviceNameKa || tag.serviceName}</Text>
+            <Text style={styles.tagPrice}>{formatCurrencyGEL(tag.price)}</Text>
+          </View>
+        </TouchableOpacity>
       </View>
-      <View style={styles.tagLabel}>
-        <Text style={styles.tagText}>{tag.serviceNameKa || tag.serviceName}</Text>
-        <Text style={styles.tagPrice}>{formatCurrencyGEL(tag.price)}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-};
+    );
+  };
 
   const renderPhotoThumbnail = ({ item, index }: { item: TaggedPhoto; index: number }) => (
     <TouchableOpacity
@@ -582,36 +858,156 @@ export default function PhotoTaggingScreen() {
       <Portal>
         <Modal
           visible={showServiceMenu}
-          onDismiss={() => setShowServiceMenu(false)}
+          onDismiss={() => {
+            setShowServiceMenu(false);
+            setServiceSearchQuery('');
+            setSelectedCategory(null);
+          }}
           contentContainerStyle={styles.serviceModal}
         >
-          <Text style={styles.modalTitle}>აირჩიეთ სერვისი</Text>
-          <Text style={styles.modalSubtitle}>აირჩიეთ სერვისი ამ დაზიანებისთვის</Text>
-          
-          {services.map((service) => (
-            <List.Item
-              key={service.key}
-              title={service.nameKa}
-              description={service.description
-                ? `${service.description} • ${formatCurrencyGEL(service.basePrice)}`
-                : formatCurrencyGEL(service.basePrice)
-              }
-              left={(props) => (
-                <List.Icon
-                  {...props}
-                  icon={service.icon}
-                  color={COLORS.primary}
-                />
+          <View style={styles.serviceModalContent}>
+            {/* Header */}
+            <View style={styles.serviceModalHeader}>
+              <View>
+                <Text style={styles.serviceModalTitle}>სერვისის არჩევა</Text>
+                <Text style={styles.serviceModalSubtitle}>აირჩიეთ სერვისი დაზიანებისთვის</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowServiceMenu(false);
+                  setServiceSearchQuery('');
+                  setSelectedCategory(null);
+                }}
+                style={styles.closeButton}
+              >
+                <MaterialCommunityIcons name="close" size={24} color={COLORS.text.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Search Bar */}
+            <View style={styles.serviceSearchContainer}>
+              <TextInput
+                mode="outlined"
+                placeholder="ძებნა..."
+                value={serviceSearchQuery}
+                onChangeText={setServiceSearchQuery}
+                left={<TextInput.Icon icon="magnify" />}
+                style={styles.serviceSearchInput}
+                dense
+              />
+            </View>
+
+            {/* Category Filter Tabs */}
+            <FlatList
+              data={getCategories()}
+              renderItem={({ item: category }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.categoryTab,
+                    selectedCategory === category && styles.categoryTabActive
+                  ]}
+                  onPress={() => setSelectedCategory(selectedCategory === category ? null : category)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryTabText,
+                      selectedCategory === category && styles.categoryTabTextActive
+                    ]}
+                  >
+                    {category}
+                  </Text>
+                </TouchableOpacity>
               )}
-              right={(props) => (
-                <Text style={styles.servicePrice}>
-                  {formatCurrencyGEL(service.basePrice)}
-                </Text>
-              )}
-              onPress={() => handleServiceSelect(service)}
-              style={styles.serviceItem}
+              keyExtractor={(item) => item}
+              horizontal
+              scrollEnabled={true}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoryTabsContainer}
+              style={styles.categoryTabsList}
             />
-          ))}
+
+            {/* Services List - Main Content */}
+            <ScrollView 
+              style={styles.servicesList}
+              contentContainerStyle={styles.servicesListContent}
+              scrollEnabled={true}
+            >
+              {(() => {
+                const filtered = services.filter(service => {
+                  // Filter by search query
+                  if (serviceSearchQuery.trim()) {
+                    const query = serviceSearchQuery.toLowerCase();
+                    if (!service.nameKa.toLowerCase().includes(query) && !service.nameEn.toLowerCase().includes(query)) {
+                      return false;
+                    }
+                  }
+                  // Filter by category
+                  if (selectedCategory && service.category !== selectedCategory) {
+                    return false;
+                  }
+                  return true;
+                });
+
+                // Sort by sortOrder
+                filtered.sort((a, b) => {
+                  const orderA = a.sortOrder ?? 999;
+                  const orderB = b.sortOrder ?? 999;
+                  return orderA - orderB;
+                });
+
+                return filtered.length > 0 ? (
+                  filtered.map((service) => (
+                    <View
+                      key={service.key}
+                      style={styles.serviceItemPro}
+                    >
+                      <TouchableOpacity
+                        style={styles.serviceItemTouchable}
+                        onPress={() => handleServiceSelect(service)}
+                        activeOpacity={0.7}
+                      >
+                                <View style={styles.serviceItemIconContainer}>
+                                  <MaterialCommunityIcons
+                                    name={service.icon as any}
+                                    size={28}
+                                    color={COLORS.primary}
+                                  />
+                                </View>
+                                <View style={styles.serviceItemInfo}>
+                                  <Text style={styles.serviceItemTitle}>{service.nameKa}</Text>
+                                  {service.description && (
+                                    <Text style={styles.serviceItemDescription}>{service.description}</Text>
+                                  )}
+                                </View>
+                                <View style={styles.serviceItemPrice}>
+                                  <Text style={styles.serviceItemPriceText}>
+                                    {formatCurrencyGEL(service.basePrice)}
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={styles.noServicesText}>
+                            {serviceSearchQuery ? 'სერვისი ვერ მოიძებნა' : 'სერვისები ჯერ არ დამატებულია'}
+                          </Text>
+                        );
+              })()}
+            </ScrollView>
+
+            {/* Add Custom Service Button */}
+            <View style={styles.customServiceButtonContainer}>
+              <Button
+                mode="contained"
+                onPress={() => setShowCustomServiceModal(true)}
+                icon="plus"
+                style={styles.customServiceButtonPro}
+                labelStyle={styles.customServiceButtonLabel}
+              >
+                ახალი სერვისი
+              </Button>
+            </View>
+          </View>
         </Modal>
       </Portal>
 
@@ -684,6 +1080,101 @@ export default function PhotoTaggingScreen() {
           </View>
         </Modal>
       </Portal>
+
+      {/* Custom Service Modal */}
+      <Portal>
+        <Modal
+          visible={showCustomServiceModal}
+          onDismiss={() => setShowCustomServiceModal(false)}
+          contentContainerStyle={styles.customServiceModal}
+        >
+          {/* Header */}
+          <View style={styles.customServiceHeader}>
+            <View>
+              <Text style={styles.customServiceTitle}>ახალი სერვისი</Text>
+              <Text style={styles.customServiceSubtitle}>დაამატე ახალი სერვის</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowCustomServiceModal(false)}
+              style={styles.closeButton}
+            >
+              <MaterialCommunityIcons name="close" size={24} color={COLORS.text.primary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.customServiceFormContainer}>
+            {/* Icon Preview */}
+            <View style={styles.customServiceIconPreview}>
+              <MaterialCommunityIcons
+                name="plus-circle"
+                size={48}
+                color={COLORS.primary}
+              />
+            </View>
+
+            <TextInput
+              mode="outlined"
+              label="სერვისის სახელი (ქართული) *"
+              value={customServiceNameKa}
+              onChangeText={setCustomServiceNameKa}
+              placeholder="მაგ: გაზეთის გაწმენდა"
+              style={styles.customServiceInput}
+              outlineColor={COLORS.outline}
+              activeOutlineColor={COLORS.primary}
+            />
+
+            <TextInput
+              mode="outlined"
+              label="Service Name (English)"
+              value={customServiceName}
+              onChangeText={setCustomServiceName}
+              placeholder="e.g., Glass Polishing"
+              style={styles.customServiceInput}
+              outlineColor={COLORS.outline}
+              activeOutlineColor={COLORS.primary}
+            />
+
+            <TextInput
+              mode="outlined"
+              label="ფასი (GEL) *"
+              value={customServicePrice}
+              onChangeText={setCustomServicePrice}
+              keyboardType="decimal-pad"
+              placeholder="100"
+              left={<TextInput.Affix text="₾" />}
+              style={styles.customServiceInput}
+              outlineColor={COLORS.outline}
+              activeOutlineColor={COLORS.primary}
+            />
+          </View>
+
+          <View style={styles.customServiceActions}>
+            <Button
+              mode="outlined"
+              onPress={() => {
+                setCustomServiceName('');
+                setCustomServiceNameKa('');
+                setCustomServicePrice('');
+                setShowCustomServiceModal(false);
+              }}
+              style={styles.cancelButton}
+              labelStyle={styles.buttonLabel}
+            >
+              გაუქმება
+            </Button>
+            <Button
+              mode="contained"
+              onPress={handleSaveCustomService}
+              loading={savingCustomService}
+              disabled={savingCustomService}
+              style={styles.saveButtonPro}
+              labelStyle={styles.buttonLabelPro}
+            >
+              დამატება
+            </Button>
+          </View>
+        </Modal>
+      </Portal>
     </View>
   );
 }
@@ -698,7 +1189,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   headerTitle: {
-    ...TYPOGRAPHY.h2,
+    fontSize: TYPOGRAPHY.fontSize['2xl'],
+    fontWeight: '600',
     color: COLORS.text.primary,
   },
   photoContainer: {
@@ -719,6 +1211,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     zIndex: 10,
+  },
+  tagDotContainer: {
+    alignItems: 'center',
   },
   tagDot: {
     width: 24,
@@ -862,14 +1357,190 @@ const styles = StyleSheet.create({
   completeButton: {
     marginLeft: 'auto',
   },
+  
+  // Enhanced Service Modal Styles
   serviceModal: {
-    backgroundColor: COLORS.surface,
-    marginHorizontal: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    maxHeight: height * 0.7,
+    backgroundColor: COLORS.background,
+    margin: 0,
+    height: '90%',
+    borderTopLeftRadius: BORDER_RADIUS.xl,
+    borderTopRightRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
   },
+  serviceModalContent: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  serviceModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  serviceModalTitle: {
+    fontSize: TYPOGRAPHY.fontSize.xl,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    marginBottom: SPACING.xs,
+  },
+  serviceModalSubtitle: {
+    fontSize: TYPOGRAPHY.fontSize.sm,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
+  },
+  closeButton: {
+    padding: SPACING.sm,
+  },
+  serviceSearchContainer: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  serviceSearchInput: {
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  categoryTabsList: {
+    maxHeight: 50,
+  },
+  categoryTabsContainer: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.sm,
+  },
+  categoryTab: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.surfaceVariant,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  categoryTabActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  categoryTabText: {
+    fontSize: TYPOGRAPHY.fontSize.sm,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    textTransform: 'capitalize',
+  },
+  categoryTabTextActive: {
+    color: COLORS.text.onPrimary,
+  },
+  servicesList: {
+    flex: 1,
+  },
+  servicesListContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  serviceCategoryHeader: {
+    fontSize: TYPOGRAPHY.fontSize.sm,
+    fontWeight: '700',
+    color: COLORS.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+  },
+  serviceItemPro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.outline,
+  },
+  serviceItemReorderButtons: {
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.xs,
+  },
+  reorderButton: {
+    padding: SPACING.xs,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reorderButtonDisabled: {
+    opacity: 0.4,
+  },
+  serviceItemIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: `${COLORS.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+  },
+  serviceItemTouchable: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  serviceItemInfo: {
+    flex: 1,
+  },
+  serviceItemTitle: {
+    fontSize: TYPOGRAPHY.fontSize.base,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: SPACING.xs,
+  },
+  serviceItemDescription: {
+    fontSize: TYPOGRAPHY.fontSize.xs,
+    color: COLORS.text.secondary,
+  },
+  serviceItemPrice: {
+    alignItems: 'flex-end',
+    marginLeft: SPACING.md,
+  },
+  serviceItemPriceText: {
+    fontSize: TYPOGRAPHY.fontSize.base,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  customServiceButtonContainer: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+    backgroundColor: COLORS.background,
+  },
+  customServiceButtonPro: {
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.sm,
+  },
+  customServiceButtonLabel: {
+    fontSize: TYPOGRAPHY.fontSize.base,
+    fontWeight: '600',
+  },
+  noServicesText: {
+    textAlign: 'center',
+    color: COLORS.text.secondary,
+    fontSize: TYPOGRAPHY.fontSize.base,
+    paddingVertical: SPACING.xl,
+  },
+  
   modalTitle: {
-    ...TYPOGRAPHY.h3,
+    fontSize: TYPOGRAPHY.fontSize.xl,
+    fontWeight: '600',
     color: COLORS.text.primary,
     textAlign: 'center',
     marginTop: SPACING.lg,
@@ -945,5 +1616,80 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     flex: 1,
+  },
+  customServiceModal: {
+    backgroundColor: COLORS.surface,
+    marginHorizontal: SPACING.md,
+    marginVertical: SPACING.xl,
+    borderRadius: BORDER_RADIUS.xl,
+    maxHeight: height * 0.85,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  customServiceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  customServiceTitle: {
+    fontSize: TYPOGRAPHY.fontSize.xl,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    marginBottom: SPACING.xs,
+  },
+  customServiceSubtitle: {
+    fontSize: TYPOGRAPHY.fontSize.sm,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
+  },
+  customServiceFormContainer: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.lg,
+  },
+  customServiceIconPreview: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: `${COLORS.primary}10`,
+    marginBottom: SPACING.xl,
+  },
+  customServiceInput: {
+    marginBottom: SPACING.lg,
+    backgroundColor: COLORS.background,
+  },
+  customServiceActions: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.lg,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  cancelButton: {
+    flex: 1,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  saveButton: {
+    flex: 1,
+  },
+  saveButtonPro: {
+    flex: 1,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  buttonLabel: {
+    fontSize: TYPOGRAPHY.fontSize.base,
+    fontWeight: '600',
+  },
+  buttonLabelPro: {
+    fontSize: TYPOGRAPHY.fontSize.base,
+    fontWeight: '600',
   },
 });
