@@ -29,6 +29,7 @@ import {
 
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
+import { fetchCPanelInvoiceId } from '../../src/services/cpanelService';
 import { getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
@@ -199,10 +200,19 @@ export default function CasesScreen() {
       Alert.alert('❌ შეცდომა', 'ინვოისი ჯერ არ არის სინქრონიზებული პორტალთან.');
       return;
     }
-    
-    const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?id=${item.cpanelInvoiceId}`;
-    
+
     try {
+      // Fetch invoice data to get the slug
+      const invoiceData = await fetchCPanelInvoiceId(item.cpanelInvoiceId);
+      const slug = invoiceData?.slug;
+
+      if (!slug) {
+        Alert.alert('❌ შეცდომა', 'Slug not found for this invoice.');
+        return;
+      }
+
+      const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?slug=${slug}`;
+
       await Share.share({
         message: `📋 ინვოისი: ${item.customerName || 'მომხმარებელი'}\n🚗 ${item.plate || item.carModel || 'ავტომობილი'}\n💰 ჯამი: ${formatCurrencyGEL(item.totalPrice)}\n\n🔗 ლინკი: ${publicUrl}`,
         url: publicUrl,
