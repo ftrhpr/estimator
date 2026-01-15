@@ -75,12 +75,19 @@ const transformServicesToGeorgian = (services) => {
     
     console.log(`[cPanel Service] Service transform: "${service.serviceName || service.name || 'N/A'}" -> "${georgianName}"`);
     
+    // Calculate discounted price if discount exists
+    const discountPercent = service.discount_percent || 0;
+    const basePrice = service.price || 0;
+    const discountedPrice = basePrice * (1 - discountPercent / 100);
+    
     return {
       ...service,
       serviceName: georgianName,
       serviceNameKa: georgianName,
       name: georgianName,  // Also set 'name' field for PHP compatibility
       originalName: service.serviceName || service.name || '',
+      discount_percent: discountPercent,
+      discountedPrice: discountedPrice,
     };
   });
 };

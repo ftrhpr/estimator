@@ -73,6 +73,7 @@ export default function CaseDetailScreen() {
   const [editServiceDescription, setEditServiceDescription] = useState('');
   const [editServicePrice, setEditServicePrice] = useState('');
   const [editServiceCount, setEditServiceCount] = useState('1');
+  const [editServiceDiscount, setEditServiceDiscount] = useState('0');
 
   // Parts state
   const [caseParts, setCaseParts] = useState<any[]>([]);
@@ -497,6 +498,7 @@ export default function CaseDetailScreen() {
     setEditServiceDescription(normalized.description || '');
     setEditServicePrice(normalized.price.toString());
     setEditServiceCount(normalized.count.toString());
+    setEditServiceDiscount((service.discount_percent || 0).toString());
     setShowEditServiceModal(true);
   };
 
@@ -530,30 +532,58 @@ export default function CaseDetailScreen() {
       const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
 
+      const serviceDiscountPercent = parseFloat(editServiceDiscount) || 0;
+      const serviceBasePrice = parseFloat(editServicePrice) || 0;
+      const serviceDiscountedPrice = serviceBasePrice * (1 - serviceDiscountPercent / 100);
+
       const updatedServices = [...caseData.services];
       updatedServices[editingServiceIndex] = {
         ...updatedServices[editingServiceIndex],
         serviceName: editServiceName,
         serviceNameKa: getServiceNameGeorgian(editServiceName),
         description: editServiceDescription,
-        price: parseFloat(editServicePrice) || 0,
+        price: serviceBasePrice,
+        discountedPrice: serviceDiscountedPrice,
+        discount_percent: serviceDiscountPercent,
         count: parseInt(editServiceCount) || 1,
       };
 
-      const newTotal = updatedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
+      // Calculate new total with individual service discounts and global discounts
+      const servicesSubtotal = updatedServices.reduce((sum, s) => {
+        const sPrice = normalizeService(s).price || s.price || 0;
+        const sDiscount = s.discount_percent || 0;
+        return sum + (sPrice * (1 - sDiscount / 100));
+      }, 0);
+      const partsSubtotal = caseParts?.reduce((sum: number, p: any) => {
+        const pPrice = p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0;
+        const pDiscount = p.discount_percent || 0;
+        return sum + (pPrice * (1 - pDiscount / 100));
+      }, 0) || 0;
+      
+      // Apply global discounts on top of individual discounts
+      const servicesDiscountAmount = servicesSubtotal * ((parseFloat(servicesDiscount) || 0) / 100);
+      const partsDiscountAmount = partsSubtotal * ((parseFloat(partsDiscount) || 0) / 100);
+      const subtotalAfterItemDiscounts = (servicesSubtotal - servicesDiscountAmount) + (partsSubtotal - partsDiscountAmount);
+      const globalDiscountAmount = subtotalAfterItemDiscounts * ((parseFloat(globalDiscount) || 0) / 100);
+      const newTotal = Math.max(0, subtotalAfterItemDiscounts - globalDiscountAmount);
 
       await updateInspection(id as string, {
         services: updatedServices,
         totalPrice: newTotal,
       }, cpanelId || undefined);
 
-      setCaseData({ ...caseData, services: updatedServices, totalPrice: newTotal });
+      setCaseData({ 
+        ...caseData, 
+        services: updatedServices, 
+        totalPrice: newTotal,
+      });
       setShowEditServiceModal(false);
       setEditingServiceIndex(null);
       setEditServiceName('');
       setEditServiceDescription('');
       setEditServicePrice('');
       setEditServiceCount('1');
+      setEditServiceDiscount('0');
       Alert.alert('✅ Success', 'Service updated successfully');
     } catch (error) {
       console.error('Error updating service:', error);
@@ -1089,13 +1119,31 @@ export default function CaseDetailScreen() {
                                     <Text style={styles.countBadgeText}>x{normalized.count}</Text>
                                   </View>
                                 )}
+                                {(service.discount_percent > 0) && (
+                                  <View style={[styles.countBadge, { backgroundColor: COLORS.success + '20' }]}>
+                                    <Text style={[styles.countBadgeText, { color: COLORS.success }]}>-{service.discount_percent}%</Text>
+                                  </View>
+                                )}
                               </View>
                               {normalized.description && (
                                 <Text style={styles.serviceDescription}>{normalized.description}</Text>
                               )}
                             </View>
                           </View>
-                          <Text style={styles.modernServicePrice}>{formatCurrencyGEL(normalized.price)}</Text>
+                          <View style={styles.servicePriceContainer}>
+                            {service.discount_percent > 0 ? (
+                              <>
+                                <Text style={[styles.modernServicePrice, { textDecorationLine: 'line-through', color: COLORS.text.secondary, fontSize: 12 }]}>
+                                  {formatCurrencyGEL(normalized.price)}
+                                </Text>
+                                <Text style={[styles.modernServicePrice, { color: COLORS.success }]}>
+                                  {formatCurrencyGEL(normalized.price * (1 - (service.discount_percent || 0) / 100))}
+                                </Text>
+                              </>
+                            ) : (
+                              <Text style={styles.modernServicePrice}>{formatCurrencyGEL(normalized.price)}</Text>
+                            )}
+                          </View>
                         </TouchableOpacity>
                       )}
                       {index < (editMode ? editedServices : caseData.services).length - 1 &&
@@ -1496,7 +1544,7 @@ export default function CaseDetailScreen() {
                 onChangeText={setEditServiceDescription}
                 mode="outlined"
                 placeholder="დაამატეთ სერვისის აღწერა"
-                style={styles.enhancedInput}
+                style={[styles.enhancedInput, styles.multilineInput]}
                 outlineStyle={styles.enhancedInputOutline}
                 activeOutlineColor={COLORS.primary}
                 textColor={COLORS.text.primary}
@@ -1547,15 +1595,39 @@ export default function CaseDetailScreen() {
               </View>
             </View>
 
+            {/* Service Discount */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputGroupLabel}>ფასდაკლება (%)</Text>
+              <TextInput
+                value={editServiceDiscount}
+                onChangeText={setEditServiceDiscount}
+                mode="outlined"
+                keyboardType="numeric"
+                placeholder="0"
+                style={styles.enhancedInput}
+                outlineStyle={styles.enhancedInputOutline}
+                activeOutlineColor={COLORS.primary}
+                left={<TextInput.Icon icon="percent" color={COLORS.text.secondary} />}
+              />
+            </View>
+
             {/* Total Preview */}
             {editServicePrice && editServiceCount && (
               <View style={styles.totalPreviewCard}>
                 <View style={styles.totalPreviewRow}>
-                  <Text style={styles.totalPreviewLabel}>სულ:</Text>
-                  <Text style={styles.totalPreviewAmount}>
+                  <Text style={styles.totalPreviewLabel}>ფასი:</Text>
+                  <Text style={[styles.totalPreviewAmount, parseFloat(editServiceDiscount) > 0 && { textDecorationLine: 'line-through', color: COLORS.text.secondary }]}>
                     {formatCurrencyGEL(parseFloat(editServicePrice) || 0)}
                   </Text>
                 </View>
+                {parseFloat(editServiceDiscount) > 0 && (
+                  <View style={styles.totalPreviewRow}>
+                    <Text style={[styles.totalPreviewLabel, { color: COLORS.success }]}>ფასდაკლებით:</Text>
+                    <Text style={[styles.totalPreviewAmount, { color: COLORS.success }]}>
+                      {formatCurrencyGEL((parseFloat(editServicePrice) || 0) * (1 - (parseFloat(editServiceDiscount) || 0) / 100))}
+                    </Text>
+                  </View>
+                )}
                 {parseInt(editServiceCount) > 1 && (
                   <Text style={styles.totalPreviewSubtext}>
                     {editServiceCount} × {formatCurrencyGEL((parseFloat(editServicePrice) || 0) / (parseInt(editServiceCount) || 1))}
@@ -1575,6 +1647,7 @@ export default function CaseDetailScreen() {
                 setEditServiceDescription('');
                 setEditServicePrice('');
                 setEditServiceCount('1');
+                setEditServiceDiscount('0');
               }}
               style={styles.cancelButton}
               labelStyle={styles.cancelButtonLabel}
@@ -2198,6 +2271,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.primary,
   },
+  servicePriceContainer: {
+    alignItems: 'flex-end',
+  },
   countChip: {
     height: 22,
     backgroundColor: COLORS.primary + '15',
@@ -2599,9 +2675,53 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     fontSize: 16,
   },
+  multilineInput: {
+    minHeight: 80,
+    paddingTop: 12,
+    paddingBottom: 12,
+    textAlignVertical: 'top',
+  },
   enhancedInputOutline: {
     borderRadius: 14,
     borderWidth: 1.5,
+    borderColor: COLORS.outline,
+  },
+  // Discount inputs in modal
+  discountsSectionInModal: {
+    marginTop: 8,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  discountsSectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  discountInputsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  discountInputWrapper: {
+    flex: 1,
+  },
+  discountInputLabelSmall: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: COLORS.text.tertiary,
+    marginBottom: 4,
+  },
+  discountInputSmall: {
+    backgroundColor: '#fff',
+    fontSize: 14,
+    height: 44,
+  },
+  discountInputOutline: {
+    borderRadius: 10,
+    borderWidth: 1,
     borderColor: COLORS.outline,
   },
   totalPreviewCard: {
