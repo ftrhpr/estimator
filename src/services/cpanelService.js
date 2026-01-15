@@ -41,15 +41,45 @@ const getGeorgianServiceName = (serviceName) => {
 const transformServicesToGeorgian = (services) => {
   if (!Array.isArray(services)) return [];
   
-  return services.map(service => {
-    const georgianName = service.serviceNameKa || 
-                         service.nameKa || 
-                         getGeorgianServiceName(service.serviceName || service.name || '');
+  return services.map((service, index) => {
+    // Get Georgian name with multiple fallbacks
+    let georgianName = '';
+    
+    // Priority 1: serviceNameKa (if not empty)
+    if (service.serviceNameKa && service.serviceNameKa.trim()) {
+      georgianName = service.serviceNameKa.trim();
+    }
+    // Priority 2: nameKa (if not empty)
+    else if (service.nameKa && service.nameKa.trim()) {
+      georgianName = service.nameKa.trim();
+    }
+    // Priority 3: Look up Georgian name from English serviceName
+    else if (service.serviceName && service.serviceName.trim()) {
+      const lookedUp = getGeorgianServiceName(service.serviceName.trim());
+      georgianName = lookedUp && lookedUp.trim() ? lookedUp : service.serviceName.trim();
+    }
+    // Priority 4: Use name field (if not empty)
+    else if (service.name && service.name.trim()) {
+      const lookedUp = getGeorgianServiceName(service.name.trim());
+      georgianName = lookedUp && lookedUp.trim() ? lookedUp : service.name.trim();
+    }
+    // Priority 5: Use description (if not empty)
+    else if (service.description && service.description.trim()) {
+      georgianName = service.description.trim();
+    }
+    // Final fallback: Generic name with index
+    else {
+      georgianName = `სერვისი ${index + 1}`;
+      console.warn(`[cPanel Service] Service at index ${index} has no name, using fallback:`, service);
+    }
+    
+    console.log(`[cPanel Service] Service transform: "${service.serviceName || service.name || 'N/A'}" -> "${georgianName}"`);
     
     return {
       ...service,
       serviceName: georgianName,
       serviceNameKa: georgianName,
+      name: georgianName,  // Also set 'name' field for PHP compatibility
       originalName: service.serviceName || service.name || '',
     };
   });
