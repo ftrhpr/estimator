@@ -596,6 +596,102 @@ export const fetchAllCPanelInvoices = async (options = {}) => {
   }
 };
 
+/**
+ * Fetch payments for a specific transfer/invoice from cPanel
+ * @param {string|number} transferId - The cPanel transfer/invoice ID
+ * @returns {Promise<{success: boolean, payments: Array, totalPaid: number, error?: string}>}
+ */
+export const fetchPaymentsFromCPanel = async (transferId) => {
+  if (!isCPanelConfigured() || !transferId) {
+    return { success: false, payments: [], totalPaid: 0, error: 'Invalid parameters' };
+  }
+
+  try {
+    const response = await makeRequest('get-payments.php', { transferId }, 'GET');
+
+    if (response.success && response.data) {
+      console.log(`[cPanel API] Fetched ${response.data.payments?.length || 0} payments`);
+      return {
+        success: true,
+        payments: response.data.payments || [],
+        totalPaid: response.data.totalPaid || 0,
+      };
+    }
+
+    return { success: false, payments: [], totalPaid: 0, error: response.error };
+  } catch (error) {
+    console.error('[cPanel API] Error fetching payments:', error);
+    return { success: false, payments: [], totalPaid: 0, error: error.message };
+  }
+};
+
+/**
+ * Create a new payment record in cPanel
+ * @param {object} paymentData - Payment data
+ * @param {number} paymentData.transferId - The cPanel transfer/invoice ID
+ * @param {number} paymentData.amount - Payment amount
+ * @param {string} paymentData.paymentMethod - Payment method (Cash, Transfer)
+ * @param {string} [paymentData.method] - Sub-method for transfers (BOG, TBC)
+ * @param {string} [paymentData.reference] - Payment reference
+ * @param {string} [paymentData.notes] - Payment notes
+ * @param {string} [paymentData.paymentDate] - Payment date
+ * @returns {Promise<{success: boolean, payment?: object, totalPaid?: number, error?: string}>}
+ */
+export const createPaymentInCPanel = async (paymentData) => {
+  if (!isCPanelConfigured() || !paymentData.transferId || !paymentData.amount) {
+    return { success: false, error: 'Invalid parameters' };
+  }
+
+  try {
+    console.log('[cPanel API] Creating payment:', paymentData);
+    const response = await makeRequest('create-payment.php', paymentData, 'POST');
+
+    if (response.success && response.data) {
+      console.log('[cPanel API] Payment created:', response.data);
+      return {
+        success: true,
+        payment: response.data.payment,
+        totalPaid: response.data.totalPaid,
+        id: response.data.id,
+      };
+    }
+
+    return { success: false, error: response.error };
+  } catch (error) {
+    console.error('[cPanel API] Error creating payment:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Delete a payment record from cPanel
+ * @param {number} paymentId - The payment ID to delete
+ * @returns {Promise<{success: boolean, totalPaid?: number, error?: string}>}
+ */
+export const deletePaymentFromCPanel = async (paymentId) => {
+  if (!isCPanelConfigured() || !paymentId) {
+    return { success: false, error: 'Invalid parameters' };
+  }
+
+  try {
+    console.log('[cPanel API] Deleting payment:', paymentId);
+    const response = await makeRequest('delete-payment.php', { paymentId }, 'DELETE');
+
+    if (response.success && response.data) {
+      console.log('[cPanel API] Payment deleted:', response.data);
+      return {
+        success: true,
+        totalPaid: response.data.totalPaid,
+      };
+    }
+
+    return { success: false, error: response.error };
+  } catch (error) {
+    console.error('[cPanel API] Error deleting payment:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 export default {
   testConnection,
   syncInvoiceToCPanel,
@@ -606,5 +702,8 @@ export default {
   fetchCPanelInvoiceId,
   fetchInvoiceFromCPanel,
   fetchAllCPanelInvoices,
+  fetchPaymentsFromCPanel,
+  createPaymentInCPanel,
+  deletePaymentFromCPanel,
   isCPanelConfigured,
 };

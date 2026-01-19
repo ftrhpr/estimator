@@ -117,6 +117,29 @@ export default function CaseDetailScreen() {
   const [newNoteText, setNewNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
 
+  // Payments state
+  const [payments, setPayments] = useState<Array<{
+    id: number;
+    transferId: number;
+    amount: number;
+    paymentDate: string;
+    paymentMethod: string;
+    method: string;
+    reference: string;
+    notes: string;
+    recordedBy: string;
+    currency: string;
+  }>>([]);
+  const [totalPaid, setTotalPaid] = useState(0);
+  const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Transfer'>('Cash');
+  const [transferMethod, setTransferMethod] = useState<'BOG' | 'TBC'>('BOG');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [loadingPayments, setLoadingPayments] = useState(false);
+
   // Tagging state
   const [showTagWorkModal, setShowTagWorkModal] = useState(false);
   const [taggingMode, setTaggingMode] = useState(false);
@@ -437,6 +460,146 @@ export default function CaseDetailScreen() {
         },
       ]
     );
+  };
+
+  // Payment functions
+  const loadPayments = async (cpanelId: string) => {
+    try {
+      setLoadingPayments(true);
+      const { fetchPaymentsFromCPanel } = require('../../src/services/cpanelService');
+      const result = await fetchPaymentsFromCPanel(cpanelId);
+
+      if (result.success) {
+        setPayments(result.payments || []);
+        setTotalPaid(result.totalPaid || 0);
+        console.log('[Case Detail] Loaded', result.payments?.length || 0, 'payments, total paid:', result.totalPaid);
+      }
+    } catch (error) {
+      console.error('[Case Detail] Error loading payments:', error);
+    } finally {
+      setLoadingPayments(false);
+    }
+  };
+
+  const handleAddPayment = async () => {
+    const amount = parseFloat(paymentAmount);
+    if (!amount || amount <= 0) {
+      Alert.alert('შეცდომა', 'გთხოვთ შეიყვანოთ თანხა');
+      return;
+    }
+
+    try {
+      setSavingPayment(true);
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      if (!cpanelId) {
+        Alert.alert('შეცდომა', 'ინვოისი არ არის სინქრონიზებული CPanel-თან');
+        return;
+      }
+
+      const paymentData = {
+        transferId: parseInt(cpanelId),
+        amount: amount,
+        paymentMethod: paymentMethod,
+        method: paymentMethod === 'Transfer' ? transferMethod : paymentMethod,
+        reference: paymentReference,
+        notes: paymentNotes,
+        paymentDate: new Date().toISOString(),
+        recordedBy: 'მობილური აპი',
+        currency: 'GEL',
+      };
+
+      console.log('[Case Detail] Creating payment:', paymentData);
+
+      const { createPaymentInCPanel } = require('../../src/services/cpanelService');
+      const result = await createPaymentInCPanel(paymentData);
+
+      if (result.success) {
+        // Reload payments to get fresh data
+        await loadPayments(cpanelId);
+
+        // Reset form
+        setPaymentAmount('');
+        setPaymentMethod('Cash');
+        setTransferMethod('BOG');
+        setPaymentReference('');
+        setPaymentNotes('');
+        setShowAddPaymentModal(false);
+
+        Alert.alert('✅ წარმატება', 'გადახდა დაემატა');
+      } else {
+        Alert.alert('❌ შეცდომა', result.error || 'გადახდის დამატება ვერ მოხერხდა');
+      }
+    } catch (error) {
+      console.error('[Case Detail] Error adding payment:', error);
+      Alert.alert('❌ შეცდომა', 'გადახდის დამატება ვერ მოხერხდა');
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: number) => {
+    Alert.alert(
+      'გადახდის წაშლა',
+      'ნამდვილად გსურთ ამ გადახდის წაშლა?',
+      [
+        { text: 'გაუქმება', style: 'cancel' },
+        {
+          text: 'წაშლა',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+              const { deletePaymentFromCPanel } = require('../../src/services/cpanelService');
+              const result = await deletePaymentFromCPanel(paymentId);
+
+              if (result.success) {
+                // Reload payments
+                if (cpanelId) {
+                  await loadPayments(cpanelId);
+                }
+                Alert.alert('✅ წარმატება', 'გადახდა წაიშალა');
+              } else {
+                Alert.alert('❌ შეცდომა', result.error || 'გადახდის წაშლა ვერ მოხერხდა');
+              }
+            } catch (error) {
+              console.error('[Case Detail] Error deleting payment:', error);
+              Alert.alert('❌ შეცდომა', 'გადახდის წაშლა ვერ მოხერხდა');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const formatPaymentDate = (dateString: string): string => {
+    try {
+      const date = new Date(dateString);
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}.${month}.${year}`;
+    } catch {
+      return dateString;
+    }
+  };
+
+  const getPaymentMethodLabel = (method: string, subMethod?: string): string => {
+    if (method === 'Cash') return 'ნაღდი';
+    if (method === 'Transfer') {
+      if (subMethod === 'BOG') return 'გადარიცხვა (BOG)';
+      if (subMethod === 'TBC') return 'გადარიცხვა (TBC)';
+      return 'გადარიცხვა';
+    }
+    if (method === 'BOG') return 'გადარიცხვა (BOG)';
+    if (method === 'TBC') return 'გადარიცხვა (TBC)';
+    return method;
+  };
+
+  const getPaymentMethodIcon = (method: string): string => {
+    if (method === 'Cash') return 'cash';
+    return 'bank-transfer';
   };
 
   const normalizeService = (service: any) => {
@@ -847,6 +1010,8 @@ export default function CaseDetailScreen() {
           setCpanelInvoiceId(id as string);
           // Load internal notes
           setInternalNotes(cpanelData.internalNotes || []);
+          // Load payments
+          loadPayments(id as string);
         } else {
           Alert.alert('❌ Error', 'CPanel case not found');
           router.back();
@@ -890,6 +1055,8 @@ export default function CaseDetailScreen() {
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
           // Background sync from cPanel to get latest data (non-blocking)
           silentSyncFromCPanel(data.cpanelInvoiceId, data);
+          // Load payments
+          loadPayments(data.cpanelInvoiceId);
         }
       } else {
         Alert.alert('❌ Error', 'Case not found');
@@ -1960,6 +2127,100 @@ export default function CaseDetailScreen() {
                       </View>
                       <Text style={styles.noteText}>{note.text}</Text>
                       {index < internalNotes.length - 1 && <Divider style={styles.noteDivider} />}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </Card.Content>
+          </Card>
+
+          {/* Payments Card */}
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: '#10B98115' }]}>
+                    <MaterialCommunityIcons name="cash-multiple" size={20} color="#10B981" />
+                  </View>
+                  <Text style={styles.cardTitle}>გადახდები ({payments.length})</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowAddPaymentModal(true)}
+                  style={styles.editIconButton}
+                >
+                  <MaterialCommunityIcons name="plus-circle" size={28} color="#10B981" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Payment Summary */}
+              <View style={styles.paymentSummary}>
+                <View style={styles.paymentSummaryRow}>
+                  <Text style={styles.paymentSummaryLabel}>სულ თანხა:</Text>
+                  <Text style={styles.paymentSummaryValue}>₾{(caseData?.totalPrice || 0).toFixed(2)}</Text>
+                </View>
+                <View style={styles.paymentSummaryRow}>
+                  <Text style={styles.paymentSummaryLabel}>გადახდილი:</Text>
+                  <Text style={[styles.paymentSummaryValue, { color: '#10B981' }]}>₾{totalPaid.toFixed(2)}</Text>
+                </View>
+                <View style={[styles.paymentSummaryRow, styles.paymentSummaryTotal]}>
+                  <Text style={styles.paymentSummaryLabelBold}>დარჩენილი:</Text>
+                  <Text style={[
+                    styles.paymentSummaryValueBold,
+                    { color: (caseData?.totalPrice || 0) - totalPaid <= 0 ? '#10B981' : '#EF4444' }
+                  ]}>
+                    ₾{Math.max(0, (caseData?.totalPrice || 0) - totalPaid).toFixed(2)}
+                  </Text>
+                </View>
+              </View>
+
+              {loadingPayments ? (
+                <View style={styles.loadingPaymentsContainer}>
+                  <ActivityIndicator size="small" color="#10B981" />
+                  <Text style={styles.loadingPaymentsText}>იტვირთება...</Text>
+                </View>
+              ) : payments.length === 0 ? (
+                <View style={styles.emptyPaymentsContainer}>
+                  <MaterialCommunityIcons name="cash-remove" size={40} color={COLORS.text.disabled} />
+                  <Text style={styles.emptyPaymentsText}>გადახდები არ არის</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowAddPaymentModal(true)}
+                    style={styles.addPaymentButton}
+                  >
+                    <MaterialCommunityIcons name="plus" size={18} color="#10B981" />
+                    <Text style={styles.addPaymentButtonText}>გადახდის დამატება</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.paymentsList}>
+                  {payments.map((payment, index) => (
+                    <View key={payment.id || index} style={styles.paymentItem}>
+                      <View style={styles.paymentItemLeft}>
+                        <View style={[styles.paymentMethodIcon, { backgroundColor: payment.paymentMethod === 'Cash' ? '#F59E0B15' : '#3B82F615' }]}>
+                          <MaterialCommunityIcons
+                            name={getPaymentMethodIcon(payment.paymentMethod)}
+                            size={18}
+                            color={payment.paymentMethod === 'Cash' ? '#F59E0B' : '#3B82F6'}
+                          />
+                        </View>
+                        <View style={styles.paymentItemInfo}>
+                          <Text style={styles.paymentItemAmount}>₾{payment.amount.toFixed(2)}</Text>
+                          <Text style={styles.paymentItemMethod}>
+                            {getPaymentMethodLabel(payment.paymentMethod, payment.method)}
+                          </Text>
+                          {payment.reference ? (
+                            <Text style={styles.paymentItemReference}>რეფ: {payment.reference}</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                      <View style={styles.paymentItemRight}>
+                        <Text style={styles.paymentItemDate}>{formatPaymentDate(payment.paymentDate)}</Text>
+                        <TouchableOpacity
+                          onPress={() => handleDeletePayment(payment.id)}
+                          style={styles.paymentDeleteButton}
+                        >
+                          <MaterialCommunityIcons name="delete-outline" size={20} color={COLORS.error} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -3275,6 +3536,197 @@ export default function CaseDetailScreen() {
         </Modal>
       </Portal>
 
+      {/* Add Payment Modal */}
+      <Portal>
+        <Modal
+          visible={showAddPaymentModal}
+          onDismiss={() => {
+            setShowAddPaymentModal(false);
+            setPaymentAmount('');
+            setPaymentMethod('Cash');
+            setTransferMethod('BOG');
+            setPaymentReference('');
+            setPaymentNotes('');
+          }}
+          contentContainerStyle={styles.addPaymentModal}
+        >
+          <View style={styles.addPaymentModalHeader}>
+            <View style={styles.addPaymentModalTitleRow}>
+              <MaterialCommunityIcons name="cash-plus" size={24} color="#10B981" />
+              <Text style={styles.addPaymentModalTitle}>გადახდის დამატება</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => {
+                setShowAddPaymentModal(false);
+                setPaymentAmount('');
+                setPaymentMethod('Cash');
+                setTransferMethod('BOG');
+                setPaymentReference('');
+                setPaymentNotes('');
+              }}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <ScrollView style={styles.addPaymentModalContent}>
+            {/* Amount Input */}
+            <View style={styles.paymentInputGroup}>
+              <Text style={styles.paymentInputLabel}>თანხა *</Text>
+              <TextInput
+                value={paymentAmount}
+                onChangeText={setPaymentAmount}
+                mode="outlined"
+                keyboardType="numeric"
+                placeholder="0.00"
+                style={styles.paymentAmountInput}
+                outlineStyle={styles.inputOutline}
+                left={<TextInput.Affix text="₾" />}
+              />
+            </View>
+
+            {/* Payment Method Selection */}
+            <View style={styles.paymentInputGroup}>
+              <Text style={styles.paymentInputLabel}>გადახდის მეთოდი</Text>
+              <View style={styles.paymentMethodOptions}>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodOption,
+                    paymentMethod === 'Cash' && styles.paymentMethodOptionSelected,
+                    paymentMethod === 'Cash' && { borderColor: '#F59E0B' }
+                  ]}
+                  onPress={() => setPaymentMethod('Cash')}
+                >
+                  <MaterialCommunityIcons
+                    name="cash"
+                    size={24}
+                    color={paymentMethod === 'Cash' ? '#F59E0B' : COLORS.text.secondary}
+                  />
+                  <Text style={[
+                    styles.paymentMethodOptionText,
+                    paymentMethod === 'Cash' && { color: '#F59E0B', fontWeight: '600' }
+                  ]}>ნაღდი</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.paymentMethodOption,
+                    paymentMethod === 'Transfer' && styles.paymentMethodOptionSelected,
+                    paymentMethod === 'Transfer' && { borderColor: '#3B82F6' }
+                  ]}
+                  onPress={() => setPaymentMethod('Transfer')}
+                >
+                  <MaterialCommunityIcons
+                    name="bank-transfer"
+                    size={24}
+                    color={paymentMethod === 'Transfer' ? '#3B82F6' : COLORS.text.secondary}
+                  />
+                  <Text style={[
+                    styles.paymentMethodOptionText,
+                    paymentMethod === 'Transfer' && { color: '#3B82F6', fontWeight: '600' }
+                  ]}>გადარიცხვა</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Bank Selection (only for Transfer) */}
+            {paymentMethod === 'Transfer' && (
+              <View style={styles.paymentInputGroup}>
+                <Text style={styles.paymentInputLabel}>ბანკი</Text>
+                <View style={styles.bankOptions}>
+                  <TouchableOpacity
+                    style={[
+                      styles.bankOption,
+                      transferMethod === 'BOG' && styles.bankOptionSelected
+                    ]}
+                    onPress={() => setTransferMethod('BOG')}
+                  >
+                    <Text style={[
+                      styles.bankOptionText,
+                      transferMethod === 'BOG' && styles.bankOptionTextSelected
+                    ]}>BOG</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.bankOption,
+                      transferMethod === 'TBC' && styles.bankOptionSelected
+                    ]}
+                    onPress={() => setTransferMethod('TBC')}
+                  >
+                    <Text style={[
+                      styles.bankOptionText,
+                      transferMethod === 'TBC' && styles.bankOptionTextSelected
+                    ]}>TBC</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Reference Input */}
+            <View style={styles.paymentInputGroup}>
+              <Text style={styles.paymentInputLabel}>რეფერენსი / ნომერი</Text>
+              <TextInput
+                value={paymentReference}
+                onChangeText={setPaymentReference}
+                mode="outlined"
+                placeholder="ტრანზაქციის ნომერი..."
+                style={styles.paymentTextInput}
+                outlineStyle={styles.inputOutline}
+              />
+            </View>
+
+            {/* Notes Input */}
+            <View style={styles.paymentInputGroup}>
+              <Text style={styles.paymentInputLabel}>შენიშვნა</Text>
+              <TextInput
+                value={paymentNotes}
+                onChangeText={setPaymentNotes}
+                mode="outlined"
+                multiline
+                numberOfLines={2}
+                placeholder="დამატებითი ინფორმაცია..."
+                style={styles.paymentTextInput}
+                outlineStyle={styles.inputOutline}
+              />
+            </View>
+          </ScrollView>
+
+          <View style={styles.addPaymentModalActions}>
+            <TouchableOpacity
+              style={styles.paymentCancelButton}
+              onPress={() => {
+                setShowAddPaymentModal(false);
+                setPaymentAmount('');
+                setPaymentMethod('Cash');
+                setTransferMethod('BOG');
+                setPaymentReference('');
+                setPaymentNotes('');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.paymentCancelButtonText}>გაუქმება</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.paymentSaveButton, savingPayment && styles.paymentSaveButtonDisabled]}
+              onPress={handleAddPayment}
+              activeOpacity={0.8}
+              disabled={savingPayment}
+            >
+              {savingPayment ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="check" size={20} color="#fff" />
+                  <Text style={styles.paymentSaveButtonText}>შენახვა</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
       {/* Photo Source Selection Modal */}
       <Portal>
         <Modal
@@ -4057,6 +4509,276 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   noteSaveButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Payment styles
+  paymentSummary: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  paymentSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  paymentSummaryTotal: {
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    marginTop: 8,
+    paddingTop: 12,
+  },
+  paymentSummaryLabel: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  paymentSummaryValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.text.primary,
+  },
+  paymentSummaryLabelBold: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  paymentSummaryValueBold: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  loadingPaymentsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 10,
+  },
+  loadingPaymentsText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  emptyPaymentsContainer: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyPaymentsText: {
+    fontSize: 14,
+    color: COLORS.text.disabled,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  addPaymentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#10B98115',
+    gap: 6,
+  },
+  addPaymentButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#10B981',
+  },
+  paymentsList: {
+    gap: 12,
+  },
+  paymentItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+  },
+  paymentItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  paymentMethodIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  paymentItemInfo: {
+    flex: 1,
+  },
+  paymentItemAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  paymentItemMethod: {
+    fontSize: 13,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  paymentItemReference: {
+    fontSize: 12,
+    color: COLORS.text.disabled,
+    marginTop: 2,
+  },
+  paymentItemRight: {
+    alignItems: 'flex-end',
+  },
+  paymentItemDate: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginBottom: 4,
+  },
+  paymentDeleteButton: {
+    padding: 4,
+  },
+
+  // Add Payment Modal styles
+  addPaymentModal: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+    maxHeight: '80%',
+  },
+  addPaymentModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  addPaymentModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  addPaymentModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  addPaymentModalContent: {
+    padding: 20,
+    maxHeight: 400,
+  },
+  paymentInputGroup: {
+    marginBottom: 16,
+  },
+  paymentInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 8,
+  },
+  paymentAmountInput: {
+    backgroundColor: '#fff',
+    fontSize: 18,
+  },
+  paymentTextInput: {
+    backgroundColor: '#fff',
+  },
+  paymentMethodOptions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  paymentMethodOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    gap: 8,
+  },
+  paymentMethodOptionSelected: {
+    backgroundColor: '#fff',
+  },
+  paymentMethodOptionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.text.secondary,
+  },
+  bankOptions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  bankOption: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  bankOptionSelected: {
+    backgroundColor: '#3B82F615',
+    borderColor: '#3B82F6',
+  },
+  bankOptionText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  bankOptionTextSelected: {
+    color: '#3B82F6',
+  },
+  addPaymentModalActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 12,
+  },
+  paymentCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentCancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  paymentSaveButton: {
+    flex: 1.5,
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  paymentSaveButtonDisabled: {
+    opacity: 0.7,
+  },
+  paymentSaveButtonText: {
     fontSize: 15,
     fontWeight: '600',
     color: '#fff',
