@@ -313,8 +313,37 @@ export default function CaseDetailScreen() {
         authorName: 'მობილური აპი', // Default author name for mobile app
       };
 
-      // Add to existing notes
-      const updatedNotes = [...internalNotes, newNote];
+      // Fetch latest notes from CPanel to merge (prevents overwriting notes added from CPanel)
+      let latestNotes: Array<{text: string; timestamp: string; authorName: string}> = [...internalNotes];
+
+      if (cpanelId) {
+        try {
+          const cpanelData = await fetchInvoiceFromCPanel(cpanelId);
+          if (cpanelData?.internalNotes && Array.isArray(cpanelData.internalNotes)) {
+            // Merge notes: use CPanel notes as base, avoiding duplicates
+            const cpanelNotes = cpanelData.internalNotes;
+            const mergedNotes = [...cpanelNotes];
+
+            // Add any local notes that aren't in CPanel (by timestamp comparison)
+            internalNotes.forEach(localNote => {
+              const exists = cpanelNotes.some((cpNote: any) =>
+                cpNote.timestamp === localNote.timestamp && cpNote.text === localNote.text
+              );
+              if (!exists) {
+                mergedNotes.push(localNote);
+              }
+            });
+
+            latestNotes = mergedNotes;
+            console.log('[Case Detail] Merged notes from CPanel:', latestNotes.length, 'total notes');
+          }
+        } catch (fetchError) {
+          console.log('[Case Detail] Could not fetch latest notes from CPanel, using local state');
+        }
+      }
+
+      // Add the new note
+      const updatedNotes = [...latestNotes, newNote];
 
       const updateData = {
         internalNotes: updatedNotes,
@@ -360,6 +389,54 @@ export default function CaseDetailScreen() {
     } catch {
       return timestamp;
     }
+  };
+
+  const handleDeleteInternalNote = async (noteIndex: number) => {
+    Alert.alert(
+      'შენიშვნის წაშლა',
+      'ნამდვილად გსურთ ამ შენიშვნის წაშლა?',
+      [
+        { text: 'გაუქმება', style: 'cancel' },
+        {
+          text: 'წაშლა',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+              // Remove the note at the specified index
+              const updatedNotes = internalNotes.filter((_, index) => index !== noteIndex);
+
+              const updateData = {
+                internalNotes: updatedNotes,
+              };
+
+              console.log('[Case Detail] Deleting internal note at index:', noteIndex);
+
+              // Update CPanel first if we have cpanel ID
+              if (cpanelId) {
+                const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+                const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+                console.log('[Case Detail] CPanel update result:', cpanelResult);
+              }
+
+              // Update Firebase
+              if (!isCpanelOnly) {
+                const { updateInspection } = require('../../src/services/firebase');
+                await updateInspection(id as string, updateData, cpanelId || undefined);
+              }
+
+              // Update local state
+              setInternalNotes(updatedNotes);
+              Alert.alert('✅ წარმატება', 'შენიშვნა წაიშალა');
+            } catch (error) {
+              console.error('Error deleting internal note:', error);
+              Alert.alert('❌ შეცდომა', 'შენიშვნის წაშლა ვერ მოხერხდა');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const normalizeService = (service: any) => {
@@ -540,6 +617,8 @@ export default function CaseDetailScreen() {
         services_discount_percent: cpanelData.services_discount_percent ?? caseData.services_discount_percent ?? 0,
         parts_discount_percent: cpanelData.parts_discount_percent ?? caseData.parts_discount_percent ?? 0,
         global_discount_percent: cpanelData.global_discount_percent ?? caseData.global_discount_percent ?? 0,
+        // Sync internal notes from cPanel
+        internalNotes: cpanelData.internalNotes || caseData.internalNotes || [],
       };
 
       const { updateInspection } = require('../../src/services/firebase');
@@ -558,6 +637,8 @@ export default function CaseDetailScreen() {
         services_discount_percent: updatedData.services_discount_percent,
         parts_discount_percent: updatedData.parts_discount_percent,
         global_discount_percent: updatedData.global_discount_percent,
+        // Save internal notes to Firebase
+        internalNotes: updatedData.internalNotes,
       });
 
       setCaseData(updatedData);
@@ -575,6 +656,8 @@ export default function CaseDetailScreen() {
       // Update workflow status state
       setRepairStatus(updatedData.repair_status);
       setCaseStatus(updatedData.status);
+      // Update internal notes state
+      setInternalNotes(updatedData.internalNotes || []);
 
       Alert.alert('✅ Sync Complete', 'Data has been synced from cPanel successfully.');
     } catch (error) {
@@ -616,6 +699,11 @@ export default function CaseDetailScreen() {
         cpanelData.repair_status !== (currentData.repair_status || null) ||
         cpanelData.status !== (currentData.status || 'New');
 
+      // Check if cPanel has different internal notes
+      const cpanelNotes = cpanelData.internalNotes || [];
+      const currentNotes = currentData.internalNotes || [];
+      const hasInternalNotesChanges = JSON.stringify(cpanelNotes) !== JSON.stringify(currentNotes);
+
       // Check if cPanel services have different individual discounts
       const cpanelServices = cpanelData.services || [];
       const currentServices = currentData.services || [];
@@ -633,8 +721,11 @@ export default function CaseDetailScreen() {
         }
       }
 
-      if (hasGlobalDiscountChanges || hasServiceDiscountChanges || hasVATChanges || hasWorkflowStatusChanges) {
+      if (hasGlobalDiscountChanges || hasServiceDiscountChanges || hasVATChanges || hasWorkflowStatusChanges || hasInternalNotesChanges) {
         console.log('[Case Detail] Silent sync: Changes detected, updating Firebase');
+        if (hasInternalNotesChanges) {
+          console.log('[Case Detail] Silent sync: Internal notes changed, syncing from CPanel');
+        }
 
         // Merge individual service discounts from cPanel to current services
         const updatedServices = currentServices.map((service: any, index: number) => {
@@ -662,6 +753,8 @@ export default function CaseDetailScreen() {
           // Workflow statuses
           repair_status: cpanelData.repair_status ?? null,
           status: cpanelData.status ?? currentData.status,
+          // Internal notes
+          internalNotes: cpanelNotes,
         });
 
         // Update local state
@@ -688,10 +781,11 @@ export default function CaseDetailScreen() {
           totalPrice: cpanelData.totalPrice || prev.totalPrice,
           repair_status: cpanelData.repair_status ?? null,
           status: cpanelData.status ?? prev.status,
+          internalNotes: cpanelNotes,
         }));
         setEditedServices(updatedServices);
 
-        console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses)');
+        console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses and internal notes)');
       } else {
         console.log('[Case Detail] Silent sync: No changes detected');
       }
