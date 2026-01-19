@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Text, TouchableOpacity, Dimensions, StatusBar } from 'react-native';
-import { router } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { COLORS, TYPOGRAPHY, SPACING, BORDER_RADIUS, SHADOWS } from '../../src/config/constants';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import React from 'react';
+import { Dimensions, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BORDER_RADIUS, COLORS, SHADOWS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 
 const { width } = Dimensions.get('window');
 
@@ -30,10 +30,11 @@ export default function HomeScreen() {
       color: COLORS.secondary,
     },
     {
-      icon: 'file-document-outline',
-      title: 'PDF Reports',
-      description: 'Professional invoices & estimates',
+      icon: 'database-outline',
+      title: 'cPanel',
+      description: 'View cPanel invoices (admin)',
       color: COLORS.accent,
+      onPress: () => router.push('/admin/cpanel-inspections'),
     },
     {
       icon: 'cloud-outline',
@@ -140,19 +141,27 @@ export default function HomeScreen() {
         <View style={styles.featuresSection}>
           <Text style={styles.sectionTitle}>Key Features</Text>
           <View style={styles.featuresGrid}>
-            {features.map((feature, index) => (
-              <View key={index} style={styles.featureCard}>
-                <View style={[styles.featureIcon, { backgroundColor: `${feature.color}15` }]}>
-                  <MaterialCommunityIcons 
-                    name={feature.icon} 
-                    size={24} 
-                    color={feature.color} 
-                  />
-                </View>
-                <Text style={styles.featureTitle}>{feature.title}</Text>
-                <Text style={styles.featureDescription}>{feature.description}</Text>
-              </View>
-            ))}
+            {features.map((feature, index) => {
+              const Wrapper: any = feature.onPress ? TouchableOpacity : View;
+              return (
+                <Wrapper
+                  key={index}
+                  style={styles.featureCard}
+                  activeOpacity={feature.onPress ? 0.8 : 1}
+                  onPress={feature.onPress}
+                >
+                  <View style={[styles.featureIcon, { backgroundColor: `${feature.color}15` }]}>
+                    <MaterialCommunityIcons 
+                      name={feature.icon} 
+                      size={24} 
+                      color={feature.color} 
+                    />
+                  </View>
+                  <Text style={styles.featureTitle}>{feature.title}</Text>
+                  <Text style={styles.featureDescription}>{feature.description}</Text>
+                </Wrapper>
+              );
+            })}
           </View>
         </View>
 

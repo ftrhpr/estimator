@@ -1,34 +1,36 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  Dimensions,
-  Image,
-  Linking,
-  Modal,
-  ScrollView,
-  Share,
-  StyleSheet,
-  TouchableOpacity,
-  View,
+    Alert,
+    Animated,
+    Dimensions,
+    Image,
+    Linking,
+    Modal,
+    ScrollView,
+    Share,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { GestureHandlerRootView, PinchGestureHandler, State } from 'react-native-gesture-handler';
 import {
-  ActivityIndicator,
-  Button,
-  Card,
-  Divider,
-  IconButton,
-  Portal,
-  Surface,
-  Text,
-  TextInput
+    ActivityIndicator,
+    Button,
+    Card,
+    Checkbox,
+    Divider,
+    IconButton,
+    Portal,
+    Surface,
+    Text,
+    TextInput
 } from 'react-native-paper';
 import Reanimated, {
-  useSharedValue,
-  withSpring
+    useSharedValue,
+    withSpring
 } from 'react-native-reanimated';
 
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
@@ -40,13 +42,22 @@ import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width, height } = Dimensions.get('window');
 
+export const options = ({ params }: { params?: { id?: string } }) => {
+  const id = params?.id;
+  return {
+    title: id ? `Invoice #${id.toString().slice(0, 8).toUpperCase()}` : 'Case',
+  };
+};
+
 export default function CaseDetailScreen() {
-  const { id } = useLocalSearchParams();
+  const { id, source } = useLocalSearchParams();
+  const isCpanelOnly = source === 'cpanel';
   const [loading, setLoading] = useState(true);
   const [caseData, setCaseData] = useState<any>(null);
   const [editMode, setEditMode] = useState(false);
   const [editedServices, setEditedServices] = useState<any[]>([]);
   const [selectedImage, setSelectedImage] = useState<any>(null);
+  const [selectedImageIndex, setSelectedImageIndex] = useState<number>(-1);
   const [showImageModal, setShowImageModal] = useState(false);
   const [editCustomerMode, setEditCustomerMode] = useState(false);
   const [editedCustomerName, setEditedCustomerName] = useState('');
@@ -86,6 +97,37 @@ export default function CaseDetailScreen() {
   const [globalDiscount, setGlobalDiscount] = useState('0');
   const [showDiscountModal, setShowDiscountModal] = useState(false);
 
+  // VAT state
+  const [includeVAT, setIncludeVAT] = useState(false);
+
+  // Workflow status state (from cPanel)
+  const [repairStatus, setRepairStatus] = useState<string | null>(null);
+  const [caseStatus, setCaseStatus] = useState<string | null>(null);
+  const [showWorkflowStatusModal, setShowWorkflowStatusModal] = useState(false);
+  const [editingRepairStatus, setEditingRepairStatus] = useState<string | null>(null);
+  const [editingCaseStatus, setEditingCaseStatus] = useState<string | null>(null);
+
+  // Photo upload state
+  const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
+  const [showPhotoSourceModal, setShowPhotoSourceModal] = useState(false);
+
+  // Internal notes state
+  const [internalNotes, setInternalNotes] = useState<Array<{text: string; timestamp: string; authorName: string}>>([]);
+  const [showAddNoteModal, setShowAddNoteModal] = useState(false);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
+
+  // Tagging state
+  const [showTagWorkModal, setShowTagWorkModal] = useState(false);
+  const [taggingMode, setTaggingMode] = useState(false);
+  const [selectedPartForTagging, setSelectedPartForTagging] = useState<any>(null);
+  const [tagPosition, setTagPosition] = useState({ x: 0, y: 0 });
+  const [showPartSelector, setShowPartSelector] = useState(false);
+  const [selectedServicesForTagging, setSelectedServicesForTagging] = useState<any[]>([]);
+  const [newPartName, setNewPartName] = useState('');
+  const [newPartNumber, setNewPartNumber] = useState('');
+  const [loadingServicesForTagging, setLoadingServicesForTagging] = useState(false);
+
   // Animation values
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -100,6 +142,19 @@ export default function CaseDetailScreen() {
     }).start();
   }, [id]);
 
+  const navigation = useNavigation();
+
+  useLayoutEffect(() => {
+    // Prefer vehicle plate for the header; fall back to customer name, then short id
+    if (caseData?.plate) {
+      navigation.setOptions({ title: caseData.plate });
+    } else if (caseData?.customerName) {
+      navigation.setOptions({ title: caseData.customerName });
+    } else if (id) {
+      navigation.setOptions({ title: `Invoice #${id.toString().slice(0, 8).toUpperCase()}` });
+    }
+  }, [caseData, id, navigation]);
+
   const getServiceNameGeorgian = (serviceName: string): string => {
     if (!serviceName) return '';
     for (const key of Object.keys(DEFAULT_SERVICES)) {
@@ -109,6 +164,202 @@ export default function CaseDetailScreen() {
       }
     }
     return serviceName;
+  };
+
+  // Workflow status helper functions
+  const getWorkflowStatusColor = (status: string | null): string => {
+    if (!status) return COLORS.text.secondary;
+    
+    // Map Georgian workflow statuses to colors
+    const statusColors: { [key: string]: string } = {
+      'წიანსწარი შეფასება': '#6366F1', // Blue - Initial assessment
+      'მუშავდება': '#8B5CF6', // Purple - Starting work
+      'იღებება': '#F59E0B', // Orange - Taking parts
+      'იშლება': '#F59E0B', // Orange - Dismantling
+      'აწყობა': '#F59E0B', // Orange - Assembling
+      'თუნუქი': '#10B981', // Green - Painting
+      'პლასტმასის აღდგენა': '#10B981', // Green - Plastic restoration
+      'პოლირება': '#10B981', // Green - Polishing
+      'დაშლილი და გასული': '#059669', // Dark green - Completed
+    };
+    
+    return statusColors[status] || '#8B5CF6';
+  };
+
+  const getWorkflowStatusLabel = (status: string | null): string => {
+    if (!status) return 'არ არის';
+    // Return the status as-is since they're already in Georgian
+    return status;
+  };
+
+  const getCaseStatusColor = (status: string | null): string => {
+    if (!status) return '#94A3B8';
+    switch (status) {
+      case 'New': return '#3B82F6';
+      case 'Processing': return '#8B5CF6';
+      case 'Contacted': return '#06B6D4';
+      case 'Parts ordered': return '#F59E0B';
+      case 'Parts Arrived': return '#22C55E';
+      case 'Scheduled': return '#6366F1';
+      case 'Completed': return '#10B981';
+      case 'Issue': return '#EF4444';
+      default: return '#94A3B8';
+    }
+  };
+
+  const getCaseStatusLabel = (status: string | null): string => {
+    if (!status) return 'არ არის';
+    switch (status) {
+      case 'New': return 'ახალი';
+      case 'Processing': return 'მუშავდება';
+      case 'Contacted': return 'დარეკილი';
+      case 'Parts ordered': return 'შეკვეთილია ნაწილები';
+      case 'Parts Arrived': return 'ჩამოსულია ნაწილები';
+      case 'Scheduled': return 'დაბარებული';
+      case 'Completed': return 'დასრულებული';
+      case 'Issue': return 'პრობლემა';
+      default: return status;
+    }
+  };
+
+  // Workflow status options
+  const repairStatusOptions = [
+    { value: null, label: 'არ არის' },
+    { value: 'წიანსწარი შეფასება', label: 'წიანსწარი შეფასება' },
+    { value: 'მუშავდება', label: 'მუშავდება' },
+    { value: 'იღებება', label: 'იღებება' },
+    { value: 'იშლება', label: 'იშლება' },
+    { value: 'აწყობა', label: 'აწყობა' },
+    { value: 'თუნუქი', label: 'თუნუქი' },
+    { value: 'პლასტმასის აღდგენა', label: 'პლასტმასის აღდგენა' },
+    { value: 'პოლირება', label: 'პოლირება' },
+    { value: 'დაშლილი და გასული', label: 'დაშლილი და გასული' },
+  ];
+
+  const caseStatusOptions = [
+    { value: null, label: 'არ არის', icon: 'minus-circle-outline', color: '#94A3B8' },
+    { value: 'New', label: 'ახალი', icon: 'new-box', color: '#3B82F6' },
+    { value: 'Processing', label: 'მუშავდება', icon: 'progress-wrench', color: '#8B5CF6' },
+    { value: 'Contacted', label: 'დარეკილი', icon: 'phone-check', color: '#06B6D4' },
+    { value: 'Parts ordered', label: 'შეკვეთილია ნაწილები', icon: 'cart-arrow-down', color: '#F59E0B' },
+    { value: 'Parts Arrived', label: 'ჩამოსულია ნაწილები', icon: 'package-variant-closed-check', color: '#22C55E' },
+    { value: 'Scheduled', label: 'დაბარებული', icon: 'calendar-check', color: '#6366F1' },
+    { value: 'Completed', label: 'დასრულებული', icon: 'check-circle', color: '#10B981' },
+    { value: 'Issue', label: 'პრობლემა', icon: 'alert-circle', color: '#EF4444' },
+  ];
+
+  const handleOpenWorkflowStatusModal = () => {
+    setEditingRepairStatus(repairStatus);
+    setEditingCaseStatus(caseStatus);
+    setShowWorkflowStatusModal(true);
+  };
+
+  const handleSaveWorkflowStatuses = async () => {
+    try {
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      // The status field stores the case status directly
+      const updateData = {
+        repair_status: editingRepairStatus,
+        status: editingCaseStatus,
+      };
+
+      console.log('[Case Detail] Saving workflow statuses:', updateData, 'cpanelId:', cpanelId);
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel update result:', cpanelResult);
+      }
+
+      // Update Firebase
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
+
+      // Update local state
+      setRepairStatus(editingRepairStatus);
+      setCaseStatus(editingCaseStatus);
+      setCaseData((prev: any) => ({
+        ...prev,
+        repair_status: editingRepairStatus,
+        status: editingCaseStatus,
+      }));
+
+      setShowWorkflowStatusModal(false);
+      Alert.alert('✅ წარმატება', 'სტატუსი განახლდა');
+    } catch (error) {
+      console.error('Error saving workflow statuses:', error);
+      Alert.alert('❌ შეცდომა', 'სტატუსის განახლება ვერ მოხერხდა');
+    }
+  };
+
+  const handleAddInternalNote = async () => {
+    if (!newNoteText.trim()) {
+      Alert.alert('შეცდომა', 'გთხოვთ შეიყვანოთ შენიშვნა');
+      return;
+    }
+
+    try {
+      setSavingNote(true);
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      // Create new note object
+      const newNote = {
+        text: newNoteText.trim(),
+        timestamp: new Date().toISOString(),
+        authorName: 'მობილური აპი', // Default author name for mobile app
+      };
+
+      // Add to existing notes
+      const updatedNotes = [...internalNotes, newNote];
+
+      const updateData = {
+        internalNotes: updatedNotes,
+      };
+
+      console.log('[Case Detail] Saving internal note:', updateData, 'cpanelId:', cpanelId);
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel update result:', cpanelResult);
+      }
+
+      // Update Firebase
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
+
+      // Update local state
+      setInternalNotes(updatedNotes);
+      setNewNoteText('');
+      setShowAddNoteModal(false);
+      Alert.alert('✅ წარმატება', 'შენიშვნა დაემატა');
+    } catch (error) {
+      console.error('Error saving internal note:', error);
+      Alert.alert('❌ შეცდომა', 'შენიშვნის შენახვა ვერ მოხერხდა');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const formatNoteDate = (timestamp: string): string => {
+    try {
+      const date = new Date(timestamp);
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      return `${day}.${month}.${year} ${hours}:${minutes}`;
+    } catch {
+      return timestamp;
+    }
   };
 
   const normalizeService = (service: any) => {
@@ -164,17 +415,26 @@ export default function CaseDetailScreen() {
     return Math.max(0, subtotal - (subtotal * discount));
   };
 
-  const getGrandTotal = () => {
+  const getSubtotalAfterDiscounts = () => {
     const subtotal = getServicesTotal() + getPartsTotal();
     const discount = (parseFloat(globalDiscount) || 0) / 100;
     return Math.max(0, subtotal - (subtotal * discount));
+  };
+
+  const getVATAmount = () => {
+    if (!includeVAT) return 0;
+    return getSubtotalAfterDiscounts() * 0.18; // 18% VAT
+  };
+
+  const getGrandTotal = () => {
+    return getSubtotalAfterDiscounts() + getVATAmount();
   };
 
   const handleSaveDiscounts = async () => {
     try {
       const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-      
+
       const discountData = {
         services_discount_percent: parseFloat(servicesDiscount) || 0,
         parts_discount_percent: parseFloat(partsDiscount) || 0,
@@ -190,6 +450,36 @@ export default function CaseDetailScreen() {
     } catch (error) {
       console.error('Error saving discounts:', error);
       Alert.alert('❌ Error', 'Failed to save discounts');
+    }
+  };
+
+  const handleVATToggle = async () => {
+    const newVATValue = !includeVAT;
+    setIncludeVAT(newVATValue);
+
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      // Calculate new totals with the new VAT value
+      const subtotal = getSubtotalAfterDiscounts();
+      const vatAmount = newVATValue ? subtotal * 0.18 : 0;
+      const newTotal = subtotal + vatAmount;
+
+      const vatData = {
+        includeVAT: newVATValue,
+        vatRate: newVATValue ? 0.18 : 0,
+        vatAmount: vatAmount,
+        subtotalBeforeVAT: subtotal,
+        totalPrice: newTotal,
+      };
+
+      await updateInspection(id as string, vatData, cpanelId || undefined);
+      setCaseData({ ...caseData, ...vatData });
+    } catch (error) {
+      console.error('Error saving VAT:', error);
+      setIncludeVAT(!newVATValue); // Revert on error
+      Alert.alert('❌ Error', 'Failed to update VAT');
     }
   };
 
@@ -243,6 +533,7 @@ export default function CaseDetailScreen() {
         plate: cpanelData.plate || caseData.plate,
         totalPrice: cpanelData.totalPrice || caseData.totalPrice,
         status: cpanelData.status || caseData.status,
+        repair_status: cpanelData.repair_status ?? caseData.repair_status ?? null,
         services: cpanelData.services || caseData.services,
         parts: cpanelData.parts || caseData.parts,
         // Sync discount fields from cPanel
@@ -260,6 +551,7 @@ export default function CaseDetailScreen() {
         plate: updatedData.plate,
         totalPrice: updatedData.totalPrice,
         status: updatedData.status,
+        repair_status: updatedData.repair_status,
         services: updatedData.services,
         parts: updatedData.parts,
         // Save discount fields to Firebase
@@ -280,6 +572,9 @@ export default function CaseDetailScreen() {
       setServicesDiscount(String(updatedData.services_discount_percent || 0));
       setPartsDiscount(String(updatedData.parts_discount_percent || 0));
       setGlobalDiscount(String(updatedData.global_discount_percent || 0));
+      // Update workflow status state
+      setRepairStatus(updatedData.repair_status);
+      setCaseStatus(updatedData.status);
 
       Alert.alert('✅ Sync Complete', 'Data has been synced from cPanel successfully.');
     } catch (error) {
@@ -309,6 +604,18 @@ export default function CaseDetailScreen() {
         cpanelData.parts_discount_percent !== (currentData.parts_discount_percent || 0) ||
         cpanelData.global_discount_percent !== (currentData.global_discount_percent || 0);
 
+      // Check if cPanel has different VAT values
+      const hasVATChanges =
+        cpanelData.includeVAT !== (currentData.includeVAT || false) ||
+        cpanelData.vatAmount !== (currentData.vatAmount || 0) ||
+        cpanelData.vatRate !== (currentData.vatRate || 0) ||
+        cpanelData.subtotalBeforeVAT !== (currentData.subtotalBeforeVAT || 0);
+
+      // Check if cPanel has different workflow status values
+      const hasWorkflowStatusChanges =
+        cpanelData.repair_status !== (currentData.repair_status || null) ||
+        cpanelData.status !== (currentData.status || 'New');
+
       // Check if cPanel services have different individual discounts
       const cpanelServices = cpanelData.services || [];
       const currentServices = currentData.services || [];
@@ -326,9 +633,9 @@ export default function CaseDetailScreen() {
         }
       }
 
-      if (hasGlobalDiscountChanges || hasServiceDiscountChanges) {
-        console.log('[Case Detail] Silent sync: Discount changes detected, updating Firebase');
-        
+      if (hasGlobalDiscountChanges || hasServiceDiscountChanges || hasVATChanges || hasWorkflowStatusChanges) {
+        console.log('[Case Detail] Silent sync: Changes detected, updating Firebase');
+
         // Merge individual service discounts from cPanel to current services
         const updatedServices = currentServices.map((service: any, index: number) => {
           if (cpanelServices[index]) {
@@ -340,31 +647,51 @@ export default function CaseDetailScreen() {
           }
           return service;
         });
-        
+
         const { updateInspection } = require('../../src/services/firebase');
         await updateInspection(id as string, {
           services: updatedServices,
           services_discount_percent: cpanelData.services_discount_percent ?? 0,
           parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
           global_discount_percent: cpanelData.global_discount_percent ?? 0,
+          includeVAT: cpanelData.includeVAT ?? false,
+          vatAmount: cpanelData.vatAmount ?? 0,
+          vatRate: cpanelData.vatRate ?? 0,
+          subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
           totalPrice: cpanelData.totalPrice || currentData.totalPrice,
+          // Workflow statuses
+          repair_status: cpanelData.repair_status ?? null,
+          status: cpanelData.status ?? currentData.status,
         });
 
         // Update local state
         setServicesDiscount(String(cpanelData.services_discount_percent || 0));
         setPartsDiscount(String(cpanelData.parts_discount_percent || 0));
         setGlobalDiscount(String(cpanelData.global_discount_percent || 0));
+        setIncludeVAT(cpanelData.includeVAT || false);
+        setRepairStatus(cpanelData.repair_status ?? null);
+        setCaseStatus(cpanelData.status ?? null);
+        // Sync internal notes from cPanel
+        if (cpanelData.internalNotes && Array.isArray(cpanelData.internalNotes)) {
+          setInternalNotes(cpanelData.internalNotes);
+        }
         setCaseData((prev: any) => ({
           ...prev,
           services: updatedServices,
           services_discount_percent: cpanelData.services_discount_percent ?? 0,
           parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
           global_discount_percent: cpanelData.global_discount_percent ?? 0,
+          includeVAT: cpanelData.includeVAT ?? false,
+          vatAmount: cpanelData.vatAmount ?? 0,
+          vatRate: cpanelData.vatRate ?? 0,
+          subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
           totalPrice: cpanelData.totalPrice || prev.totalPrice,
+          repair_status: cpanelData.repair_status ?? null,
+          status: cpanelData.status ?? prev.status,
         }));
         setEditedServices(updatedServices);
 
-        console.log('[Case Detail] Silent sync: Discounts updated from cPanel');
+        console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses)');
       } else {
         console.log('[Case Detail] Silent sync: No changes detected');
       }
@@ -377,6 +704,63 @@ export default function CaseDetailScreen() {
   const loadCaseDetails = async () => {
     try {
       setLoading(true);
+
+      // If this is a CPanel-only case, fetch directly from CPanel
+      if (isCpanelOnly) {
+        console.log('[Case Detail] Loading CPanel-only case:', id);
+        const cpanelData = await fetchInvoiceFromCPanel(id as string);
+
+        if (cpanelData) {
+          const data = {
+            id: cpanelData.cpanelId?.toString() || id,
+            customerName: cpanelData.customerName || '',
+            customerPhone: cpanelData.customerPhone || '',
+            carMake: cpanelData.carMake || cpanelData.vehicleMake || '',
+            carModel: cpanelData.carModel || cpanelData.vehicleModel || '',
+            plate: cpanelData.plate || '',
+            totalPrice: cpanelData.totalPrice || 0,
+            repair_status: cpanelData.repair_status || null,
+            status: cpanelData.status || 'New',
+            services: cpanelData.services || [],
+            parts: cpanelData.parts || [],
+            photos: cpanelData.photos || [],
+            createdAt: cpanelData.createdAt,
+            updatedAt: cpanelData.updatedAt,
+            services_discount_percent: cpanelData.services_discount_percent || 0,
+            parts_discount_percent: cpanelData.parts_discount_percent || 0,
+            global_discount_percent: cpanelData.global_discount_percent || 0,
+            includeVAT: cpanelData.includeVAT || false,
+            vatAmount: cpanelData.vatAmount || 0,
+            vatRate: cpanelData.vatRate || 0,
+            subtotalBeforeVAT: cpanelData.subtotalBeforeVAT || 0,
+            isCpanelOnly: true,
+          };
+
+          setCaseData(data);
+          setEditedServices(data.services || []);
+          setCaseParts(data.parts || []);
+          setEditedCustomerName(data.customerName || '');
+          setEditedCustomerPhone(data.customerPhone || '');
+          setEditedCarMake(data.carMake || '');
+          setEditedCarModel(data.carModel || '');
+          setEditedPlate(data.plate || '');
+          setServicesDiscount(String(data.services_discount_percent || 0));
+          setPartsDiscount(String(data.parts_discount_percent || 0));
+          setGlobalDiscount(String(data.global_discount_percent || 0));
+          setIncludeVAT(data.includeVAT || false);
+          setRepairStatus(data.repair_status);
+          setCaseStatus(data.status || null);
+          setCpanelInvoiceId(id as string);
+          // Load internal notes
+          setInternalNotes(cpanelData.internalNotes || []);
+        } else {
+          Alert.alert('❌ Error', 'CPanel case not found');
+          router.back();
+        }
+        return;
+      }
+
+      // Firebase case loading
       const { db } = require('../../src/services/firebase');
       const { doc, getDoc } = require('firebase/firestore');
 
@@ -387,7 +771,8 @@ export default function CaseDetailScreen() {
         const data = { id: docSnap.id, ...docSnap.data() };
         setCaseData(data);
         setEditedServices(data.services || []);
-        setCaseParts(data.parts || []);
+        // inventoryParts contains parts with prices, parts contains damage tagging data
+        setCaseParts(data.inventoryParts || []);
         setEditedCustomerName(data.customerName || '');
         setEditedCustomerPhone(data.customerPhone || '');
         setEditedCarMake(data.carMake || '');
@@ -399,6 +784,13 @@ export default function CaseDetailScreen() {
         setServicesDiscount(String(data.services_discount_percent || 0));
         setPartsDiscount(String(data.parts_discount_percent || 0));
         setGlobalDiscount(String(data.global_discount_percent || 0));
+        // Load VAT
+        setIncludeVAT(data.includeVAT || false);
+        // Load workflow statuses
+        setRepairStatus(data.repair_status || null);
+        setCaseStatus(data.status || null);
+        // Load internal notes
+        setInternalNotes(data.internalNotes || []);
         if (data.cpanelInvoiceId) {
           setCpanelInvoiceId(data.cpanelInvoiceId);
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
@@ -431,6 +823,18 @@ export default function CaseDetailScreen() {
     try {
       // Fetch full invoice data to get the slug
       const invoiceData = await fetchInvoiceFromCPanel(invoiceId);
+      const slug = invoiceData?.slug;
+
+      if (!slug) {
+        Alert.alert('❌ Error', 'Slug not found for this invoice.');
+        return;
+      }
+
+      const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?slug=${slug}`;
+
+      const result = await Share.share({
+        message: `📋 Invoice for ${caseData.customerName || 'Customer'}\n🚗 ${caseData.plate || caseData.carModel || 'Vehicle'}\n💰 Total: ${formatCurrencyGEL(caseData.totalPrice)}\n\n🔗 View invoice: ${publicUrl}`,
+        url: publicUrl, // iOS only
         title: `Invoice #${id.toString().slice(0, 8).toUpperCase()}`,
       });
 
@@ -668,8 +1072,18 @@ export default function CaseDetailScreen() {
     }
   };
 
-  const handleImagePress = (photo: any) => {
+  const handleImagePress = (photo: any, index: number) => {
     setSelectedImage(photo);
+    setSelectedImageIndex(index);
+    // reset tagging state so previous incomplete flows don't block new tagging
+    setTaggingMode(false);
+    setShowTagWorkModal(false);
+    setShowPartSelector(false);
+    setSelectedPartForTagging(null);
+    setSelectedServicesForTagging([]);
+    setNewPartName('');
+    setNewPartNumber('');
+    setTagPosition({ x: 0, y: 0 });
     setShowImageModal(true);
   };
 
@@ -850,6 +1264,250 @@ export default function CaseDetailScreen() {
     }
   };
 
+  const handleAddPhotos = async () => {
+    setShowPhotoSourceModal(true);
+  };
+
+  const handleTakePhoto = async () => {
+    setShowPhotoSourceModal(false);
+
+    // 1. Request camera permissions
+    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    if (cameraStatus !== 'granted') {
+      Alert.alert('Permission required', 'Sorry, we need camera permissions to take photos!');
+      return;
+    }
+
+    // 2. Launch camera
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: false,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      try {
+        setIsUploadingPhotos(true);
+        const { uploadMultipleImages, updateInspection } = require('../../src/services/firebase');
+
+        // 3. Upload the photo to Firebase Storage
+        const newImages = result.assets.map(asset => ({ uri: asset.uri, label: 'Camera Photo' }));
+        const uploadedPhotos = await uploadMultipleImages(newImages, id as string);
+
+        // 4. Combine with existing photos
+        const existingPhotos = caseData.photos || [];
+        const updatedPhotos = [...existingPhotos, ...uploadedPhotos];
+
+        // 5. Update inspection document in Firestore
+        const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+        await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+
+        // 6. Update local state
+        setCaseData({ ...caseData, photos: updatedPhotos });
+
+        Alert.alert('Success', 'Photo taken and added successfully!');
+      } catch (error) {
+        console.error('Error taking photo:', error);
+        Alert.alert('Error', 'Failed to take photo. Please try again.');
+      } finally {
+        setIsUploadingPhotos(false);
+      }
+    }
+  };
+
+  const handleSelectFromGallery = async () => {
+    setShowPhotoSourceModal(false);
+
+    // 1. Request permissions
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Sorry, we need camera roll permissions to make this work!');
+      return;
+    }
+
+    // 2. Launch image picker
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled && result.assets) {
+      try {
+        setIsUploadingPhotos(true);
+        const { uploadMultipleImages, updateInspection } = require('../../src/services/firebase');
+
+        // 3. Upload new images to Firebase Storage
+        const newImages = result.assets.map(asset => ({ uri: asset.uri, label: 'Gallery Photo' }));
+        const uploadedPhotos = await uploadMultipleImages(newImages, id as string);
+
+        // 4. Combine with existing photos
+        const existingPhotos = caseData.photos || [];
+        const updatedPhotos = [...existingPhotos, ...uploadedPhotos];
+
+        // 5. Update inspection document in Firestore
+        const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+        await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+
+        // 6. Update local state
+        setCaseData({ ...caseData, photos: updatedPhotos });
+
+        Alert.alert('Success', 'Photos added successfully!');
+      } catch (error) {
+        console.error('Error adding photos:', error);
+        Alert.alert('Error', 'Failed to add photos. Please try again.');
+      } finally {
+        setIsUploadingPhotos(false);
+      }
+    }
+  };
+
+  const handleRemovePhoto = async (photoIndex: number) => {
+    Alert.alert(
+      'Remove Photo',
+      'Are you sure you want to remove this photo? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { updateInspection } = require('../../src/services/firebase');
+
+              // Remove the photo from the array
+              const updatedPhotos = caseData.photos.filter((_: any, index: number) => index !== photoIndex);
+
+              // Update inspection document in Firestore
+              const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+              await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+
+              // Update local state
+              setCaseData({ ...caseData, photos: updatedPhotos });
+
+              // Close image modal if the removed photo was being viewed
+              if (selectedImageIndex === photoIndex) {
+                setShowImageModal(false);
+                setSelectedImage(null);
+                setSelectedImageIndex(-1);
+              }
+
+              Alert.alert('Success', 'Photo removed successfully!');
+            } catch (error) {
+              console.error('Error removing photo:', error);
+              Alert.alert('Error', 'Failed to remove photo. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSaveTag = async () => {
+    // Validate tag position (0 is valid)
+    if (tagPosition.x == null || tagPosition.y == null || Number.isNaN(tagPosition.x) || Number.isNaN(tagPosition.y)) {
+      Alert.alert('Error', 'Please tap on the photo to choose a location');
+      return;
+    }
+
+    if (selectedImageIndex == null || selectedImageIndex < 0) {
+      Alert.alert('Error', 'No photo selected');
+      return;
+    }
+
+    // If user didn't pick an existing part, require a new part name
+    const isCreatingNewPart = !selectedPartForTagging || (newPartName && newPartName.trim().length > 0);
+    if (isCreatingNewPart && (!newPartName || newPartName.trim().length === 0)) {
+      Alert.alert('Error', 'Please enter a part name');
+      return;
+    }
+
+    // Require at least one service selected for the tag
+    if (!selectedServicesForTagging || selectedServicesForTagging.length === 0) {
+      Alert.alert('Error', 'Please select at least one service for this tag');
+      return;
+    }
+
+    try {
+      const { updateInspection } = require('../../src/services/firebase');
+
+      // Build services payload from selected services
+      const servicesPayload = selectedServicesForTagging.map((s: any) => ({ name: s.name || s.serviceName || s.title, price: s.price || s.basePrice || 0 }));
+
+      // Create the damage/tag object
+      const newDamage = {
+        photoIndex: selectedImageIndex,
+        xPercent: tagPosition.x,
+        yPercent: tagPosition.y,
+        services: servicesPayload,
+      };
+
+      // Prepare updated parts array
+      let updatedParts = Array.isArray(caseData.parts) ? [...caseData.parts] : [];
+
+      if (!isCreatingNewPart) {
+        // Attach to existing selected part
+        const existingPartIndex = updatedParts.findIndex((part: any) =>
+          part.id === selectedPartForTagging.id ||
+          part.nameKa === selectedPartForTagging.nameKa ||
+          part.name === selectedPartForTagging.name
+        );
+
+        if (existingPartIndex !== -1) {
+          const existingPart = updatedParts[existingPartIndex];
+          const updatedPart = {
+            ...existingPart,
+            damages: [...(existingPart.damages || []), newDamage],
+          };
+          updatedParts[existingPartIndex] = updatedPart;
+        } else {
+          // selectedPartForTagging wasn't found by id — add as new with supplied services
+          const fallbackPart = {
+            ...(selectedPartForTagging || {}),
+            id: selectedPartForTagging?.id || `part-${Date.now()}`,
+            damages: [newDamage],
+          };
+          updatedParts.push(fallbackPart);
+        }
+      } else {
+        // Create a new part from newPartName + selected services
+        const newPart = {
+          id: `part-${Date.now()}`,
+          name: newPartName.trim(),
+          nameKa: newPartName.trim(),
+          partNumber: newPartNumber?.trim() || undefined,
+          unitPrice: servicesPayload.reduce((s: number, it: any) => s + (it.price || 0), 0),
+          damages: [newDamage],
+        } as any;
+
+        updatedParts = [...updatedParts, newPart];
+      }
+
+      // Persist
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      await updateInspection(id as string, { parts: updatedParts }, cpanelId || undefined);
+
+      // Update local state
+      setCaseData({ ...caseData, parts: updatedParts });
+      setCaseParts(updatedParts);
+
+      // Reset tagging UI state
+      setShowTagWorkModal(false);
+      setShowPartSelector(false);
+      setTaggingMode(false);
+      setSelectedPartForTagging(null);
+      setSelectedServicesForTagging([]);
+      setNewPartName('');
+      setNewPartNumber('');
+      setTagPosition({ x: 0, y: 0 });
+
+      Alert.alert('Success', 'Work tagged successfully!');
+    } catch (error) {
+      console.error('Error saving tag:', error);
+      Alert.alert('Error', 'Failed to tag work. Please try again.');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -935,6 +1593,70 @@ export default function CaseDetailScreen() {
               </View>
             </View>
           </Card>
+
+          {/* Workflow Status Card */}
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: '#8B5CF6' + '15' }]}>
+                    <MaterialCommunityIcons name="clipboard-flow" size={20} color="#8B5CF6" />
+                  </View>
+                  <Text style={styles.cardTitle}>სამუშაო სტატუსი</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={handleOpenWorkflowStatusModal}
+                  style={styles.editIconButton}
+                >
+                  <MaterialCommunityIcons
+                    name="pencil-circle"
+                    size={28}
+                    color="#8B5CF6"
+                  />
+                </TouchableOpacity>
+              </View>
+
+                <View style={styles.workflowStatusContainer}>
+                  {/* Repair Status */}
+                  <View style={styles.workflowStatusRow}>
+                    <View style={styles.workflowStatusLabel}>
+                      <MaterialCommunityIcons name="wrench" size={16} color={COLORS.text.secondary} />
+                      <Text style={styles.workflowLabelText}>რემონტის სტატუსი</Text>
+                    </View>
+                    <View style={[
+                      styles.workflowStatusBadge,
+                      { backgroundColor: getWorkflowStatusColor(repairStatus) + '15' }
+                    ]}>
+                      <Text style={[
+                        styles.workflowStatusText,
+                        { color: getWorkflowStatusColor(repairStatus) }
+                      ]}>
+                        {getWorkflowStatusLabel(repairStatus)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* User Response */}
+                  <View style={styles.workflowStatusRow}>
+                    <View style={styles.workflowStatusLabel}>
+                      <MaterialCommunityIcons name="briefcase-check" size={16} color={COLORS.text.secondary} />
+                      <Text style={styles.workflowLabelText}>საქმის სტატუსი</Text>
+                    </View>
+                    <View style={[
+                      styles.workflowStatusBadge,
+                      { backgroundColor: getCaseStatusColor(caseStatus) + '15' }
+                    ]}>
+                      <Text style={[
+                        styles.workflowStatusText,
+                        { color: getCaseStatusColor(caseStatus) }
+                      ]}>
+                        {getCaseStatusLabel(caseStatus)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </Card.Content>
+            </Card>
 
           {/* Customer Info Card - Enhanced */}
           <Card style={styles.modernCard}>
@@ -1096,6 +1818,56 @@ export default function CaseDetailScreen() {
                       </View>
                     </>
                   )}
+                </View>
+              )}
+            </Card.Content>
+          </Card>
+
+          {/* Internal Notes Card */}
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: '#F59E0B15' }]}>
+                    <MaterialCommunityIcons name="note-text" size={20} color="#F59E0B" />
+                  </View>
+                  <Text style={styles.cardTitle}>შიდა შენიშვნები ({internalNotes.length})</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowAddNoteModal(true)}
+                  style={styles.editIconButton}
+                >
+                  <MaterialCommunityIcons name="plus-circle" size={28} color="#F59E0B" />
+                </TouchableOpacity>
+              </View>
+
+              {internalNotes.length === 0 ? (
+                <View style={styles.emptyNotesContainer}>
+                  <MaterialCommunityIcons name="note-outline" size={40} color={COLORS.text.disabled} />
+                  <Text style={styles.emptyNotesText}>შენიშვნები არ არის</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowAddNoteModal(true)}
+                    style={styles.addNoteButton}
+                  >
+                    <MaterialCommunityIcons name="plus" size={18} color="#F59E0B" />
+                    <Text style={styles.addNoteButtonText}>შენიშვნის დამატება</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.notesList}>
+                  {internalNotes.map((note, index) => (
+                    <View key={index} style={styles.noteItem}>
+                      <View style={styles.noteHeader}>
+                        <View style={styles.noteAuthorContainer}>
+                          <MaterialCommunityIcons name="account-circle" size={18} color={COLORS.primary} />
+                          <Text style={styles.noteAuthor}>{note.authorName}</Text>
+                        </View>
+                        <Text style={styles.noteDate}>{formatNoteDate(note.timestamp)}</Text>
+                      </View>
+                      <Text style={styles.noteText}>{note.text}</Text>
+                      {index < internalNotes.length - 1 && <Divider style={styles.noteDivider} />}
+                    </View>
+                  ))}
                 </View>
               )}
             </Card.Content>
@@ -1320,7 +2092,8 @@ export default function CaseDetailScreen() {
                 <View style={styles.servicesSubtotal}>
                   <Text style={styles.subtotalLabel}>ნაწილების ჯამი:</Text>
                   <Text style={styles.subtotalValue}>
-                    {formatCurrencyGEL(caseParts.reduce((sum: number, p: any) => sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0))}
+                    {formatCurrencyGEL(caseParts.reduce((sum: number, p: any) => 
+                      sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0))}
                   </Text>
                 </View>
               </Card.Content>
@@ -1375,6 +2148,21 @@ export default function CaseDetailScreen() {
                     <Text style={styles.discountAppliedValue}>-{formatCurrencyGEL((getServicesTotal() + getPartsTotal()) * (parseFloat(globalDiscount) / 100))}</Text>
                   </View>
                 )}
+
+                {/* VAT Checkbox */}
+                <View style={styles.vatCheckboxRow}>
+                  <View style={styles.vatCheckboxContainer}>
+                    <Checkbox
+                      status={includeVAT ? 'checked' : 'unchecked'}
+                      onPress={handleVATToggle}
+                      color={COLORS.primary}
+                    />
+                    <Text style={styles.vatCheckboxLabel}>დღგ +18%</Text>
+                  </View>
+                  {includeVAT && (
+                    <Text style={styles.vatDisplayValue}>+{formatCurrencyGEL(getVATAmount())}</Text>
+                  )}
+                </View>
               </View>
 
               {/* Grand Total */}
@@ -1397,42 +2185,70 @@ export default function CaseDetailScreen() {
           </Card>
 
           {/* Photos with Modern Gallery Layout */}
-          {caseData.photos && caseData.photos.length > 0 && (
-            <Card style={styles.modernCard}>
-              <Card.Content style={styles.cardContent}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardHeaderLeft}>
-                    <View style={[styles.iconCircle, { backgroundColor: COLORS.warning + '15' }]}>
-                      <MaterialCommunityIcons name="image-multiple" size={20} color={COLORS.warning} />
-                    </View>
-                    <Text style={styles.cardTitle}>ფოტოები ({caseData.photos.length})</Text>
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: COLORS.warning + '15' }]}>
+                    <MaterialCommunityIcons name="image-multiple" size={20} color={COLORS.warning} />
                   </View>
+                  <Text style={styles.cardTitle}>
+                    ფოტოები {caseData.photos && caseData.photos.length > 0 ? `(${caseData.photos.length})` : ''}
+                  </Text>
                 </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modernPhotoScroll}>
+                <TouchableOpacity
+                  onPress={handleAddPhotos}
+                  style={styles.editIconButton}
+                  disabled={isUploadingPhotos}
+                >
+                  {isUploadingPhotos ? (
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                  ) : (
+                    <MaterialCommunityIcons name="plus-circle" size={28} color={COLORS.success} />
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {caseData.photos && caseData.photos.length > 0 ? (
+                <View style={styles.photoGallery}>
                   {caseData.photos.map((photo: any, index: number) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={styles.modernPhotoCard}
-                      onPress={() => handleImagePress(photo)}
-                      activeOpacity={0.8}
-                    >
-                      <Image source={{ uri: photo.url }} style={styles.modernPhotoImage} />
-                      <View style={styles.modernPhotoOverlay}>
-                        <Text style={styles.modernPhotoLabel}>{photo.label || `Photo ${index + 1}`}</Text>
-                        {caseData.parts && caseData.parts.some((part: any) =>
-                          part.damages?.some((d: any) => d.photoIndex === index)
-                        ) && (
-                          <View style={styles.taggedBadge}>
-                            <MaterialCommunityIcons name="tag" size={12} color="#fff" />
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
+                    <View key={index} style={styles.photoCardContainer}>
+                      <TouchableOpacity
+                        style={styles.modernPhotoCard}
+                        onPress={() => handleImagePress(photo, index)}
+                        activeOpacity={0.8}
+                      >
+                        <Image source={{ uri: photo.url }} style={styles.modernPhotoImage} />
+                        <View style={styles.modernPhotoOverlay}>
+                          <Text style={styles.modernPhotoLabel}>{photo.label || `Photo ${index + 1}`}</Text>
+                          {caseData.parts && caseData.parts.some((part: any) =>
+                            part.damages?.some((d: any) => d.photoIndex === index)
+                          ) && (
+                            <View style={styles.taggedBadge}>
+                              <MaterialCommunityIcons name="tag" size={12} color="#fff" />
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.removePhotoButton}
+                        onPress={() => handleRemovePhoto(index)}
+                        activeOpacity={0.8}
+                      >
+                        <MaterialCommunityIcons name="close-circle" size={24} color={COLORS.error} />
+                      </TouchableOpacity>
+                    </View>
                   ))}
-                </ScrollView>
-              </Card.Content>
-            </Card>
-          )}
+                </View>
+              ) : (
+                <View style={styles.emptyPhotosContainer}>
+                  <MaterialCommunityIcons name="image-plus" size={48} color={COLORS.text.disabled} />
+                  <Text style={styles.emptyPhotosText}>ფოტოები არ არის დამატებული</Text>
+                  <Text style={styles.emptyPhotosSubtext}>დააჭირეთ + ღილაკს ფოტოების დასამატებლად</Text>
+                </View>
+              )}
+            </Card.Content>
+          </Card>
 
           <View style={{ height: 120 }} />
         </Animated.View>
@@ -1769,6 +2585,11 @@ export default function CaseDetailScreen() {
           visible={showImageModal}
           onDismiss={() => {
             setShowImageModal(false);
+            setShowTagWorkModal(false);
+            setTaggingMode(false);
+            setSelectedPartForTagging(null);
+            setTagPosition({ x: 0, y: 0 });
+            setShowPartSelector(false);
             scale.value = withSpring(1);
             savedScale.value = 1;
           }}
@@ -1780,6 +2601,14 @@ export default function CaseDetailScreen() {
                 <View style={styles.imageModalHeader}>
                   <Text style={styles.imageModalTitle}>{selectedImage.label || 'Photo'}</Text>
                   <View style={styles.headerActions}>
+                    <TouchableOpacity
+                      style={styles.tagWorkButton}
+                      onPress={() => setShowTagWorkModal(true)}
+                      activeOpacity={0.8}
+                    >
+                      <MaterialCommunityIcons name="tag-plus" size={20} color={COLORS.primary} />
+                      <Text style={styles.tagWorkButtonText}>Tag Work</Text>
+                    </TouchableOpacity>
                     <IconButton
                       icon="refresh"
                       size={20}
@@ -1794,6 +2623,11 @@ export default function CaseDetailScreen() {
                       size={24}
                       onPress={() => {
                         setShowImageModal(false);
+                        setShowTagWorkModal(false);
+                        setTaggingMode(false);
+                        setSelectedPartForTagging(null);
+                        setTagPosition({ x: 0, y: 0 });
+                        setShowPartSelector(false);
                         scale.value = withSpring(1);
                         savedScale.value = 1;
                       }}
@@ -1808,119 +2642,167 @@ export default function CaseDetailScreen() {
                 </View>
 
               <View style={styles.imageContainer}>
-                <PinchGestureHandler
-                  onGestureEvent={(event) => {
-                    scale.value = savedScale.value * event.nativeEvent.scale;
-                  }}
-                  onHandlerStateChange={(event) => {
-                    if (event.nativeEvent.oldState === State.ACTIVE) {
-                      savedScale.value = scale.value;
-                      if (scale.value < 1) {
-                        scale.value = withSpring(1);
-                        savedScale.value = 1;
-                      } else if (scale.value > 3) {
-                        scale.value = withSpring(3);
-                        savedScale.value = 3;
-                      }
+                <TouchableOpacity
+                  style={styles.imageWrapper}
+                  activeOpacity={1}
+                  onPressIn={(event) => {
+                    if (!taggingMode) return;
+
+                    const { locationX, locationY } = event.nativeEvent as any;
+                    const { width: containerWidth, height: containerHeight } = containerDimensions || { width: 0, height: 0 };
+
+                    // Guard: image must be laid out before tagging
+                    if (!containerWidth || !containerHeight) {
+                      Alert.alert('Please wait', 'Image not ready for tagging — try again in a moment.');
+                      return;
                     }
+
+                    // Calculate and clamp relative position (0..1)
+                    const relativeX = Math.max(0, Math.min(1, locationX / containerWidth));
+                    const relativeY = Math.max(0, Math.min(1, locationY / containerHeight));
+
+                    setTagPosition({ x: relativeX, y: relativeY });
+                    // Ensure the instruction modal isn't blocking touches
+                    setShowTagWorkModal(false);
+                    // Load available services if not already loaded (non-blocking)
+                    if (!availableServices || availableServices.length === 0) {
+                      loadAvailableServices().catch(()=>{});
+                    }
+                    setShowPartSelector(true);
                   }}
+                  disabled={!taggingMode}
                 >
-                  <Reanimated.View
-                    style={[
-                      styles.imageWrapper,
-                      {
-                        transform: [{ scale: scale }],
-                      },
-                    ]}
-                    onLayout={(event) => {
-                      const { width: w, height: h } = event.nativeEvent.layout;
-                      setContainerDimensions({ width: w, height: h });
-
-                      if (selectedImage && actualImageSize.width > 0 && actualImageSize.height > 0) {
-                        const containerAspect = w / h;
-                        const imageAspect = actualImageSize.width / actualImageSize.height;
-
-                        let displayWidth, displayHeight;
-                        if (imageAspect > containerAspect) {
-                          displayWidth = w;
-                          displayHeight = w / imageAspect;
-                        } else {
-                          displayHeight = h;
-                          displayWidth = h * imageAspect;
+                  <PinchGestureHandler
+                    onGestureEvent={(event) => {
+                      scale.value = savedScale.value * event.nativeEvent.scale;
+                    }}
+                    onHandlerStateChange={(event) => {
+                      if (event.nativeEvent.oldState === State.ACTIVE) {
+                        savedScale.value = scale.value;
+                        if (scale.value < 1) {
+                          scale.value = withSpring(1);
+                          savedScale.value = 1;
+                        } else if (scale.value > 3) {
+                          scale.value = withSpring(3);
+                          savedScale.value = 3;
                         }
-
-                        setImageDimensions({ width: displayWidth, height: displayHeight });
                       }
                     }}
                   >
-                    <Image
-                      source={{ uri: selectedImage.url }}
-                      style={styles.fullImage}
-                      resizeMode="contain"
-                      onLoad={(event) => {
-                        const { width: imgW, height: imgH } = event.nativeEvent.source;
-                        setActualImageSize({ width: imgW, height: imgH });
+                    <Reanimated.View
+                      style={[
+                        styles.imageWrapper,
+                        {
+                          transform: [{ scale: scale }],
+                        },
+                      ]}
+                      onLayout={(event) => {
+                        const { width: w, height: h } = event.nativeEvent.layout;
+                        setContainerDimensions({ width: w, height: h });
 
-                        if (containerDimensions.width > 0 && containerDimensions.height > 0) {
-                          const containerAspect = containerDimensions.width / containerDimensions.height;
-                          const imageAspect = imgW / imgH;
+                        if (selectedImage && actualImageSize.width > 0 && actualImageSize.height > 0) {
+                          const containerAspect = w / h;
+                          const imageAspect = actualImageSize.width / actualImageSize.height;
 
                           let displayWidth, displayHeight;
                           if (imageAspect > containerAspect) {
-                            displayWidth = containerDimensions.width;
-                            displayHeight = containerDimensions.width / imageAspect;
+                            displayWidth = w;
+                            displayHeight = w / imageAspect;
                           } else {
-                            displayHeight = containerDimensions.height;
-                            displayWidth = containerDimensions.height * imageAspect;
+                            displayHeight = h;
+                            displayWidth = h * imageAspect;
                           }
 
                           setImageDimensions({ width: displayWidth, height: displayHeight });
                         }
                       }}
-                    />
+                    >
+                      <Image
+                        source={{ uri: selectedImage.url }}
+                        style={styles.fullImage}
+                        resizeMode="contain"
+                        onLoad={(event) => {
+                          const { width: imgW, height: imgH } = event.nativeEvent.source;
+                          setActualImageSize({ width: imgW, height: imgH });
 
-                    {imageDimensions.width > 0 && containerDimensions.width > 0 && caseData.parts && caseData.parts
-                      .filter((part: any) => part.damages?.some((d: any) =>
-                        caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex
-                      ))
-                      .map((part: any) =>
-                        part.damages
-                          .filter((d: any) => caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex)
-                          .map((damage: any, idx: number) => {
-                            const offsetX = (containerDimensions.width - imageDimensions.width) / 2;
-                            const offsetY = (containerDimensions.height - imageDimensions.height) / 2;
+                          if (containerDimensions.width > 0 && containerDimensions.height > 0) {
+                            const containerAspect = containerDimensions.width / containerDimensions.height;
+                            const imageAspect = imgW / imgH;
 
-                            let displayX, displayY;
-                            if (damage.xPercent !== undefined && damage.yPercent !== undefined) {
-                              displayX = (damage.xPercent * imageDimensions.width) + offsetX;
-                              displayY = (damage.yPercent * imageDimensions.height) + offsetY;
+                            let displayWidth, displayHeight;
+                            if (imageAspect > containerAspect) {
+                              displayWidth = containerDimensions.width;
+                              displayHeight = containerDimensions.width / imageAspect;
                             } else {
-                              const scaleX = imageDimensions.width / width;
-                              const scaleY = imageDimensions.height / height;
-                              displayX = (damage.x * scaleX) + offsetX;
-                              displayY = (damage.y * scaleY) + offsetY;
+                              displayHeight = containerDimensions.height;
+                              displayWidth = containerDimensions.height * imageAspect;
                             }
 
-                            return (
-                              <View
-                                key={`${part.partName}-${idx}`}
-                                style={[
-                                  styles.tagMarker,
-                                  {
-                                    left: displayX - 16,
-                                    top: displayY - 16,
-                                  },
-                                ]}
-                              >
-                                <View style={styles.tagDot}>
-                                  <MaterialCommunityIcons name="wrench" size={12} color="#fff" />
+                            setImageDimensions({ width: displayWidth, height: displayHeight });
+                          }
+                        }}
+                      />
+
+                      {imageDimensions.width > 0 && containerDimensions.width > 0 && caseData.parts && caseData.parts
+                        .filter((part: any) => part.damages?.some((d: any) =>
+                          selectedImageIndex === d.photoIndex
+                        ))
+                        .map((part: any) =>
+                          part.damages
+                            .filter((d: any) => selectedImageIndex === d.photoIndex)
+                            .map((damage: any, idx: number) => {
+                              const offsetX = (containerDimensions.width - imageDimensions.width) / 2;
+                              const offsetY = (containerDimensions.height - imageDimensions.height) / 2;
+
+                              let displayX, displayY;
+                              if (damage.xPercent !== undefined && damage.yPercent !== undefined) {
+                                displayX = (damage.xPercent * imageDimensions.width) + offsetX;
+                                displayY = (damage.yPercent * imageDimensions.height) + offsetY;
+                              } else {
+                                const scaleX = imageDimensions.width / width;
+                                const scaleY = imageDimensions.height / height;
+                                displayX = (damage.x * scaleX) + offsetX;
+                                displayY = (damage.y * scaleY) + offsetY;
+                              }
+
+                              return (
+                                <View
+                                  key={`${part.partName}-${idx}`}
+                                  style={[
+                                    styles.tagMarker,
+                                    {
+                                      left: displayX - 16,
+                                      top: displayY - 16,
+                                    },
+                                  ]}
+                                >
+                                  <View style={styles.tagDot}>
+                                    <MaterialCommunityIcons name="wrench" size={12} color="#fff" />
+                                  </View>
                                 </View>
-                              </View>
-                            );
-                          })
+                              );
+                            })
+                        )}
+
+                      {/* Temporary tag marker during tagging */}
+                      {taggingMode && tagPosition.x != null && tagPosition.y != null && !Number.isNaN(tagPosition.x) && !Number.isNaN(tagPosition.y) && (
+                        <View
+                          style={[
+                            styles.tagMarker,
+                            {
+                              left: Math.max(0, (tagPosition.x * containerDimensions.width) - 16),
+                              top: Math.max(0, (tagPosition.y * containerDimensions.height) - 16),
+                            },
+                          ]}
+                        >
+                          <View style={[styles.tagDot, { backgroundColor: COLORS.accent }]}>
+                            <MaterialCommunityIcons name="plus" size={12} color="#fff" />
+                          </View>
+                        </View>
                       )}
-                  </Reanimated.View>
-                </PinchGestureHandler>
+                    </Reanimated.View>
+                  </PinchGestureHandler>
+                </TouchableOpacity>
               </View>
 
               {caseData.parts && (
@@ -1928,7 +2810,7 @@ export default function CaseDetailScreen() {
                   <Text style={styles.taggedInfoTitle}>Tagged Work on this Photo:</Text>
                   {caseData.parts
                     .filter((part: any) => part.damages?.some((d: any) =>
-                      caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex
+                      selectedImageIndex === d.photoIndex
                     ))
                     .map((part: any, idx: number) => (
                       <View key={idx} style={styles.taggedPartCard}>
@@ -1936,7 +2818,7 @@ export default function CaseDetailScreen() {
                         <View style={styles.taggedPartInfo}>
                           <Text style={styles.taggedPartName}>{part.partName}</Text>
                           {part.damages
-                            .filter((d: any) => caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex)
+                            .filter((d: any) => selectedImageIndex === d.photoIndex)
                             .map((damage: any, dIdx: number) => (
                               <View key={dIdx} style={styles.taggedServicesList}>
                                 {damage.services.map((service: any, sIdx: number) => (
@@ -1950,7 +2832,7 @@ export default function CaseDetailScreen() {
                       </View>
                     ))}
                   {caseData.parts.filter((part: any) => part.damages?.some((d: any) =>
-                    caseData.photos.findIndex((p: any) => p.url === selectedImage.url) === d.photoIndex
+                    selectedImageIndex === d.photoIndex
                   )).length === 0 && (
                     <Text style={styles.noTagsText}>No work tagged on this photo</Text>
                   )}
@@ -2079,6 +2961,508 @@ export default function CaseDetailScreen() {
             >
               შენახვა
             </Button>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Workflow Status Edit Modal - Redesigned */}
+      <Portal>
+        <Modal
+          visible={showWorkflowStatusModal}
+          onDismiss={() => setShowWorkflowStatusModal(false)}
+          contentContainerStyle={styles.workflowModal}
+        >
+          {/* Header */}
+          <View style={styles.workflowModalHeader}>
+            <View style={styles.workflowModalHeaderIcon}>
+              <MaterialCommunityIcons name="clipboard-flow" size={24} color="#8B5CF6" />
+            </View>
+            <Text style={styles.workflowModalTitle}>სტატუსის რედაქტირება</Text>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowWorkflowStatusModal(false)}
+              iconColor={COLORS.text.secondary}
+              style={styles.workflowModalClose}
+            />
+          </View>
+
+          <ScrollView style={styles.workflowModalContent} showsVerticalScrollIndicator={false}>
+            {/* Repair Status Section */}
+            <View style={styles.workflowSection}>
+              <View style={styles.workflowSectionHeader}>
+                <MaterialCommunityIcons name="wrench" size={20} color="#8B5CF6" />
+                <Text style={styles.workflowSectionTitle}>რემონტის სტატუსი</Text>
+              </View>
+
+              {/* Progress Steps */}
+              <View style={styles.workflowStepsContainer}>
+                {repairStatusOptions.map((option, index) => {
+                  const isSelected = editingRepairStatus === option.value;
+                  const currentIndex = repairStatusOptions.findIndex(o => o.value === editingRepairStatus);
+                  const isPast = currentIndex > index && currentIndex !== -1;
+                  const stepColor = option.value === null ? '#94A3B8' : getWorkflowStatusColor(option.value);
+
+                  return (
+                    <TouchableOpacity
+                      key={option.value || 'null'}
+                      style={[
+                        styles.workflowStep,
+                        isSelected && { backgroundColor: stepColor + '15', borderColor: stepColor },
+                        isPast && { backgroundColor: stepColor + '08' }
+                      ]}
+                      onPress={() => setEditingRepairStatus(option.value)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[
+                        styles.workflowStepIndicator,
+                        isSelected && { backgroundColor: stepColor },
+                        isPast && { backgroundColor: stepColor, opacity: 0.5 }
+                      ]}>
+                        {isSelected ? (
+                          <MaterialCommunityIcons name="check" size={14} color="#fff" />
+                        ) : isPast ? (
+                          <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                        ) : (
+                          <Text style={styles.workflowStepNumber}>{index}</Text>
+                        )}
+                      </View>
+                      <Text style={[
+                        styles.workflowStepText,
+                        isSelected && { color: stepColor, fontWeight: '600' },
+                        isPast && { color: stepColor }
+                      ]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* User Response Section */}
+            <View style={styles.workflowSection}>
+              <View style={styles.workflowSectionHeader}>
+                <MaterialCommunityIcons name="clipboard-list" size={20} color="#10B981" />
+                <Text style={styles.workflowSectionTitle}>საქმის სტატუსი</Text>
+              </View>
+
+              <View style={styles.userResponseGrid}>
+                {caseStatusOptions.map((option) => {
+                  const isSelected = editingCaseStatus === option.value;
+                  const statusColor = option.color;
+
+                  return (
+                    <TouchableOpacity
+                      key={option.value || 'null'}
+                      style={[
+                        styles.userResponseCard,
+                        isSelected && { backgroundColor: statusColor + '15', borderColor: statusColor }
+                      ]}
+                      onPress={() => setEditingCaseStatus(option.value)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[
+                        styles.userResponseIconContainer,
+                        isSelected && { backgroundColor: statusColor + '20' }
+                      ]}>
+                        <MaterialCommunityIcons
+                          name={option.icon as any}
+                          size={24}
+                          color={isSelected ? statusColor : '#94A3B8'}
+                        />
+                      </View>
+                      <Text style={[
+                        styles.userResponseText,
+                        isSelected && { color: statusColor, fontWeight: '600' }
+                      ]}>
+                        {option.label}
+                      </Text>
+                      {isSelected && (
+                        <View style={[styles.userResponseCheckmark, { backgroundColor: statusColor }]}>
+                          <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </ScrollView>
+
+          {/* Actions */}
+          <View style={styles.workflowModalActions}>
+            <TouchableOpacity
+              style={styles.workflowCancelButton}
+              onPress={() => setShowWorkflowStatusModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.workflowCancelButtonText}>გაუქმება</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.workflowSaveButton}
+              onPress={handleSaveWorkflowStatuses}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="check" size={20} color="#fff" />
+              <Text style={styles.workflowSaveButtonText}>შენახვა</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Add Internal Note Modal */}
+      <Portal>
+        <Modal
+          visible={showAddNoteModal}
+          onDismiss={() => {
+            setShowAddNoteModal(false);
+            setNewNoteText('');
+          }}
+          contentContainerStyle={styles.addNoteModal}
+        >
+          <View style={styles.addNoteModalHeader}>
+            <View style={styles.addNoteModalTitleRow}>
+              <MaterialCommunityIcons name="note-plus" size={24} color="#F59E0B" />
+              <Text style={styles.addNoteModalTitle}>შენიშვნის დამატება</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => {
+                setShowAddNoteModal(false);
+                setNewNoteText('');
+              }}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.addNoteModalContent}>
+            <TextInput
+              label="შენიშვნა"
+              value={newNoteText}
+              onChangeText={setNewNoteText}
+              mode="outlined"
+              multiline
+              numberOfLines={4}
+              style={styles.noteTextInput}
+              outlineStyle={styles.inputOutline}
+              placeholder="შეიყვანეთ შენიშვნა..."
+            />
+          </View>
+
+          <View style={styles.addNoteModalActions}>
+            <TouchableOpacity
+              style={styles.noteCancelButton}
+              onPress={() => {
+                setShowAddNoteModal(false);
+                setNewNoteText('');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.noteCancelButtonText}>გაუქმება</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.noteSaveButton, savingNote && styles.noteSaveButtonDisabled]}
+              onPress={handleAddInternalNote}
+              activeOpacity={0.8}
+              disabled={savingNote}
+            >
+              {savingNote ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="check" size={20} color="#fff" />
+                  <Text style={styles.noteSaveButtonText}>შენახვა</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Photo Source Selection Modal */}
+      <Portal>
+        <Modal
+          visible={showPhotoSourceModal}
+          onDismiss={() => setShowPhotoSourceModal(false)}
+          contentContainerStyle={styles.photoSourceModal}
+        >
+          <View style={styles.photoSourceModalHeader}>
+            <Text style={styles.photoSourceModalTitle}>ფოტოს დამატება</Text>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowPhotoSourceModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.photoSourceModalContent}>
+            <TouchableOpacity
+              style={styles.photoSourceOption}
+              onPress={handleTakePhoto}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.photoSourceIcon, { backgroundColor: COLORS.primary + '15' }]}>
+                <MaterialCommunityIcons name="camera" size={32} color={COLORS.primary} />
+              </View>
+              <Text style={styles.photoSourceTitle}>გადაიღეთ ფოტო</Text>
+              <Text style={styles.photoSourceSubtitle}>გამოიყენეთ კამერა ახალი ფოტოს გადასაღებად</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.photoSourceOption}
+              onPress={handleSelectFromGallery}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.photoSourceIcon, { backgroundColor: COLORS.success + '15' }]}>
+                <MaterialCommunityIcons name="image-multiple" size={32} color={COLORS.success} />
+              </View>
+              <Text style={styles.photoSourceTitle}>აირჩიეთ გალერეიდან</Text>
+              <Text style={styles.photoSourceSubtitle}>აირჩიეთ ფოტოები თქვენი გალერეიდან</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Tag Work Modal */}
+      <Portal>
+        <Modal
+          visible={showTagWorkModal}
+          onDismiss={() => {
+            setShowTagWorkModal(false);
+            setTaggingMode(false);
+            setSelectedPartForTagging(null);
+            setTagPosition({ x: 0, y: 0 });
+          }}
+          contentContainerStyle={styles.tagWorkModal}
+        >
+          <View style={styles.tagWorkModalHeader}>
+            <Text style={styles.tagWorkModalTitle}>Tag Work on Photo</Text>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => {
+                setShowTagWorkModal(false);
+                setTaggingMode(false);
+                setSelectedPartForTagging(null);
+                setTagPosition({ x: 0, y: 0 });
+              }}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.tagWorkModalContent}>
+            {!taggingMode ? (
+              <View style={styles.tagInstructions}>
+                <MaterialCommunityIcons name="gesture-tap" size={48} color={COLORS.primary} />
+                <Text style={styles.tagInstructionsTitle}>Tap on the photo to tag work</Text>
+                <Text style={styles.tagInstructionsText}>
+                  Select a location on the photo where the work needs to be done, then choose the part and services.
+                </Text>
+                <Button
+                  mode="contained"
+                  onPress={() => {
+                    // Close the instruction modal so taps reach the photo and enable tagging
+                    setShowTagWorkModal(false);
+                    setTaggingMode(true);
+                    setTagPosition({ x: 0, y: 0 });
+                    setShowPartSelector(false);
+                  }}
+                  style={styles.startTaggingButton}
+                  buttonColor={COLORS.primary}
+                  icon="tag-plus"
+                >
+                  Start Tagging
+                </Button>
+              </View>
+            ) : (
+              <View style={styles.taggingInterface}>
+                <Text style={styles.taggingInstructions}>
+                  Tap on the photo where you want to tag work
+                </Text>
+                <Button
+                  mode="outlined"
+                  onPress={() => {
+                    setTaggingMode(false);
+                    setSelectedPartForTagging(null);
+                    setTagPosition({ x: 0, y: 0 });
+                  }}
+                  style={styles.cancelTaggingButton}
+                >
+                  Cancel Tagging
+                </Button>
+              </View>
+            )}
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Part Selector Modal */}
+      <Portal>
+        <Modal
+          visible={showPartSelector}
+          onDismiss={() => {
+            setShowPartSelector(false);
+            setSelectedPartForTagging(null);
+          }}
+          contentContainerStyle={styles.partSelectorModal}
+        >
+          <View style={styles.partSelectorModalHeader}>
+            <Text style={styles.partSelectorModalTitle}>Select Part & Services</Text>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => {
+                setShowPartSelector(false);
+                setSelectedPartForTagging(null);
+              }}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.partSelectorModalContent}>
+            <Text style={styles.partSelectorInstructions}>
+              Choose a part and the services needed for this location
+            </Text>
+
+            {/* Existing parts (if any) */}
+            {caseParts && caseParts.length > 0 ? (
+              <ScrollView style={styles.partsList} showsVerticalScrollIndicator={false}>
+                {caseParts.map((part: any, index: number) => (
+                  <TouchableOpacity
+                    key={part.id || `part-${index}`}
+                    style={[
+                      styles.partSelectorItem,
+                      selectedPartForTagging?.id === part.id && styles.partSelectorItemSelected
+                    ]}
+                    onPress={() => {
+                      setSelectedPartForTagging(part);
+                      // reset selected services for a fresh selection (could prefill from existing damages in future)
+                      setSelectedServicesForTagging([]);
+                      // ensure available services are loaded
+                      if (!availableServices || availableServices.length === 0) loadAvailableServices().catch(()=>{});
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.partSelectorItemLeft}>
+                      <View style={[styles.partIcon, { backgroundColor: COLORS.primary + '15' }]}>
+                        <MaterialCommunityIcons name="cog" size={20} color={COLORS.primary} />
+                      </View>
+                      <View>
+                        <Text style={styles.partSelectorItemName}>
+                          {part.nameKa || part.name || 'Part'}
+                        </Text>
+                        {part.partNumber && (
+                          <Text style={styles.partSelectorItemNumber}>#{part.partNumber}</Text>
+                        )}
+                      </View>
+                    </View>
+                    <Text style={styles.partSelectorItemPrice}>
+                      {formatCurrencyGEL(part.unitPrice || part.totalPrice || 0)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={{ marginVertical: 8 }}>
+                <Text style={[styles.partSelectorInstructions, { marginBottom: 12, textAlign: 'center' }]}>No parts found for this case — create a new part to tag work</Text>
+              </View>
+            )}
+
+            {/* Create new part (always available) */}
+            <View style={{ marginTop: 12, gap: 8 }}>
+              <TextInput
+                label="New part name"
+                value={newPartName}
+                onChangeText={setNewPartName}
+                mode="outlined"
+                style={styles.modernInput}
+                outlineStyle={styles.inputOutline}
+                placeholder="e.g. Front bumper"
+              />
+              <TextInput
+                label="Part number (optional)"
+                value={newPartNumber}
+                onChangeText={setNewPartNumber}
+                mode="outlined"
+                style={styles.modernInput}
+                outlineStyle={styles.inputOutline}
+                placeholder="#12345"
+              />
+
+              <Text style={[styles.inputGroupLabel, { marginTop: 8 }]}>Select services for this tag</Text>
+
+              {/* Services list (uses availableServices, falls back to DEFAULT_SERVICES) */}
+              {loadingServicesForTagging ? (
+                <View style={styles.loadingServicesContainer}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                </View>
+              ) : (
+                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+                  {(availableServices && availableServices.length > 0 ? availableServices : Object.values(DEFAULT_SERVICES)).map((svc: any, i: number) => {
+                    const svcId = svc.id || svc.nameEn || svc.name || `svc-${i}`;
+                    const svcName = svc.nameKa || svc.nameEn || svc.name || svc.description || 'Service';
+                    const svcPrice = svc.basePrice ?? svc.price ?? svc.rate ?? 0;
+                    const checked = selectedServicesForTagging.some(s => (s._id || s.id || s.name) === (svc._id || svcId || svcName));
+
+                    return (
+                      <TouchableOpacity
+                        key={svcId}
+                        style={[styles.modernServiceItem, checked && styles.modernServiceItemSelected]}
+                        onPress={() => {
+                          if (checked) {
+                            setSelectedServicesForTagging(prev => prev.filter(p => (p._id || p.id || p.name) !== (svc._id || svcId || svcName)));
+                          } else {
+                            setSelectedServicesForTagging(prev => [...prev, { name: svcName, price: svcPrice, id: svcId }]);
+                          }
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.serviceItemName}>{svcName}</Text>
+                        <Text style={styles.serviceItemPrice}>{formatCurrencyGEL(svcPrice)}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+
+            {/* Selected-part actions (works for existing or newly-entered part) */}
+            {(selectedPartForTagging || newPartName.trim().length > 0) && (
+              <View style={styles.selectedPartActions}>
+                <Text style={styles.selectedPartText}>
+                  {selectedPartForTagging ? `Selected: ${selectedPartForTagging.nameKa || selectedPartForTagging.name}` : `New part: ${newPartName}`}
+                </Text>
+                <View style={styles.partSelectorActions}>
+                  <Button
+                    mode="outlined"
+                    onPress={() => {
+                      setSelectedPartForTagging(null);
+                      setNewPartName('');
+                      setNewPartNumber('');
+                      setSelectedServicesForTagging([]);
+                      setShowPartSelector(false);
+                      setTaggingMode(false);
+                      setTagPosition({ x: 0, y: 0 });
+                    }}
+                    style={styles.cancelPartButton}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    mode="contained"
+                    onPress={handleSaveTag}
+                    style={styles.saveTagButton}
+                    buttonColor={COLORS.primary}
+                    icon="check"
+                  >
+                    Tag Work
+                  </Button>
+                </View>
+              </View>
+            )}
           </View>
         </Modal>
       </Portal>
@@ -2240,6 +3624,385 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.success,
     borderWidth: 2,
     borderColor: '#fff',
+  },
+
+  // Workflow Status Styles
+  workflowStatusContainer: {
+    gap: 12,
+  },
+  workflowStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  workflowStatusLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  workflowLabelText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
+  },
+  workflowStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  workflowStatusText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  // New Workflow Modal Styles
+  workflowModal: {
+    backgroundColor: '#fff',
+    margin: 16,
+    borderRadius: 24,
+    maxHeight: '85%',
+    overflow: 'hidden',
+  },
+  workflowModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  workflowModalHeaderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#8B5CF6' + '15',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  workflowModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+    flex: 1,
+  },
+  workflowModalClose: {
+    margin: 0,
+  },
+  workflowModalContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  workflowSection: {
+    marginBottom: 24,
+  },
+  workflowSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  workflowSectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  workflowStepsContainer: {
+    gap: 8,
+  },
+  workflowStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  workflowStepIndicator: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  workflowStepNumber: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  workflowStepText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.text.secondary,
+    flex: 1,
+  },
+  userResponseGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  userResponseCard: {
+    width: '47%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    position: 'relative',
+  },
+  userResponseIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  userResponseText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.text.secondary,
+    flex: 1,
+  },
+  userResponseCheckmark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  workflowModalActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 12,
+  },
+  workflowCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  workflowCancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  workflowSaveButton: {
+    flex: 1.5,
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  workflowSaveButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Internal Notes styles
+  emptyNotesContainer: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyNotesText: {
+    fontSize: 14,
+    color: COLORS.text.disabled,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  addNoteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#F59E0B15',
+    gap: 6,
+  },
+  addNoteButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#F59E0B',
+  },
+  notesList: {
+    marginTop: 8,
+  },
+  noteItem: {
+    paddingVertical: 12,
+  },
+  noteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  noteAuthorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  noteAuthor: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  noteDate: {
+    fontSize: 12,
+    color: COLORS.text.disabled,
+  },
+  noteText: {
+    fontSize: 14,
+    color: COLORS.text.primary,
+    lineHeight: 20,
+  },
+  noteDivider: {
+    marginTop: 12,
+    backgroundColor: '#F1F5F9',
+  },
+
+  // Add Note Modal styles
+  addNoteModal: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+    maxHeight: '60%',
+  },
+  addNoteModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  addNoteModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  addNoteModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  addNoteModalContent: {
+    padding: 20,
+  },
+  noteTextInput: {
+    backgroundColor: '#fff',
+    minHeight: 120,
+  },
+  addNoteModalActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 12,
+  },
+  noteCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteCancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  noteSaveButton: {
+    flex: 1.5,
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#F59E0B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  noteSaveButtonDisabled: {
+    opacity: 0.7,
+  },
+  noteSaveButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Legacy workflow styles (kept for compatibility)
+  workflowEditSection: {
+    marginBottom: 20,
+  },
+  workflowEditLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 12,
+  },
+  workflowOptionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  workflowOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  workflowOptionSelected: {
+    backgroundColor: '#8B5CF6' + '15',
+    borderColor: '#8B5CF6',
+  },
+  workflowOptionText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.text.secondary,
+  },
+  workflowOptionTextSelected: {
+    color: '#8B5CF6',
+    fontWeight: '600',
   },
 
   // Modern Cards
@@ -3202,6 +4965,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.success,
   },
+  vatDisplayLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
+    paddingLeft: 0,
+  },
+  vatDisplayValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  vatCheckboxRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  vatCheckboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  vatCheckboxLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginLeft: 4,
+  },
   grandTotalSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3219,5 +5012,313 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: COLORS.primary,
+  },
+  // Photo Gallery Styles
+  photoGallery: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 8,
+  },
+  photoCardContainer: {
+    position: 'relative',
+  },
+  modernPhotoCard: {
+    width: (width - 16 * 2 - 20 * 2 - 12) / 2, // Two columns with gap
+    height: 120,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#F8FAFC',
+    elevation: 2,
+  },
+  modernPhotoImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  modernPhotoOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modernPhotoLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+    flex: 1,
+  },
+  taggedBadge: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 4,
+  },
+  removePhotoButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+  },
+  emptyPhotosContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  emptyPhotosText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  emptyPhotosSubtext: {
+    fontSize: 14,
+    color: COLORS.text.tertiary,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  // Photo Source Modal Styles
+  photoSourceModal: {
+    margin: 20,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 0,
+    maxWidth: 400,
+    alignSelf: 'center',
+  },
+  photoSourceModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  photoSourceModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  photoSourceModalContent: {
+    padding: 20,
+    gap: 16,
+  },
+  photoSourceOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  photoSourceIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  photoSourceTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 4,
+  },
+  photoSourceSubtitle: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    flex: 1,
+  },
+  // Tag Work Modal Styles
+  tagWorkModal: {
+    margin: 20,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 0,
+    maxWidth: 400,
+    alignSelf: 'center',
+  },
+  tagWorkModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  tagWorkModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  tagWorkModalContent: {
+    padding: 20,
+  },
+  tagInstructions: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  tagInstructionsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  tagInstructionsText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  startTaggingButton: {
+    minWidth: 150,
+  },
+  taggingInterface: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  taggingInstructions: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.primary,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  cancelTaggingButton: {
+    minWidth: 120,
+  },
+  tagWorkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  tagWorkButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.primary,
+    marginLeft: 4,
+  },
+  // Part Selector Modal Styles
+  partSelectorModal: {
+    margin: 16,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 0,
+    maxHeight: '80%',
+  },
+  partSelectorModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  partSelectorModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  partSelectorModalContent: {
+    padding: 20,
+  },
+  partSelectorInstructions: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  partsList: {
+    maxHeight: 300,
+    marginBottom: 20,
+  },
+  partSelectorItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  partSelectorItemSelected: {
+    backgroundColor: COLORS.primary + '10',
+    borderColor: COLORS.primary,
+  },
+  partSelectorItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  partIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  partSelectorItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  partSelectorItemNumber: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
+  partSelectorItemPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  selectedPartActions: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+    paddingTop: 20,
+  },
+  selectedPartText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  partSelectorActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelPartButton: {
+    flex: 1,
+  },
+  saveTagButton: {
+    flex: 1,
   },
 });

@@ -307,6 +307,10 @@ export const syncInvoiceToCPanel = async (invoiceData, firebaseId) => {
       status: invoiceData.status || 'New',
       serviceDate: invoiceData.createdAt || new Date().toISOString(),
       createdAt: invoiceData.createdAt || new Date().toISOString(),
+      includeVAT: invoiceData.includeVAT || false,
+      vatAmount: invoiceData.vatAmount || 0,
+      vatRate: invoiceData.vatRate || 0,
+      subtotalBeforeVAT: invoiceData.subtotalBeforeVAT || 0,
     };
     
     console.log('[cPanel API] Syncing invoice:', firebaseId);
@@ -520,11 +524,11 @@ export const fetchInvoiceFromCPanel = async (cpanelInvoiceId = null, firebaseId 
     const params = { fullData: 'true' };
     if (cpanelInvoiceId) params.invoiceId = cpanelInvoiceId;
     if (firebaseId) params.firebaseId = firebaseId;
-    
+
     console.log('[cPanel API] Fetching invoice from cPanel:', params);
-    
+
     const response = await makeRequest('get-invoice-id.php', params, 'GET');
-    
+
     if (response.success && response.data) {
       console.log('[cPanel API] Invoice fetched successfully:', response.data);
       return response.data;
@@ -533,6 +537,62 @@ export const fetchInvoiceFromCPanel = async (cpanelInvoiceId = null, firebaseId 
   } catch (error) {
     console.error('[cPanel API] Error fetching invoice:', error);
     return null;
+  }
+};
+
+/**
+ * Fetch all invoices from cPanel database
+ * @param {object} [options] - Optional filters
+ * @param {number} [options.limit] - Max number of invoices (default: 100, max: 500)
+ * @param {number} [options.offset] - Offset for pagination (default: 0)
+ * @param {boolean} [options.onlyCPanelOnly] - Only fetch invoices not synced with Firebase
+ * @returns {Promise<{success: boolean, invoices: Array<any>, total?: number, hasMore?: boolean, error?: string}>}
+ */
+export const fetchAllCPanelInvoices = async (options = {}) => {
+  if (!isCPanelConfigured()) {
+    console.warn('[cPanel API] Not configured, cannot fetch invoices');
+    return {
+      success: false,
+      invoices: [],
+      error: 'cPanel API not configured',
+    };
+  }
+
+  try {
+    const params = {
+      limit: options.limit || 100,
+      offset: options.offset || 0,
+      onlyCPanelOnly: options.onlyCPanelOnly ? 'true' : 'false',
+    };
+
+    console.log('[cPanel API] Fetching all invoices with params:', params);
+
+    const response = await makeRequest('get-all-invoices.php', params, 'GET');
+
+    if (response.success && response.data) {
+      console.log(`[cPanel API] Fetched ${response.data.invoices?.length || 0} invoices from cPanel`);
+      return {
+        success: true,
+        invoices: response.data.invoices || [],
+        total: response.data.total || 0,
+        hasMore: response.data.hasMore || false,
+        limit: response.data.limit,
+        offset: response.data.offset,
+      };
+    }
+
+    return {
+      success: false,
+      invoices: [],
+      error: response.error || 'Unknown error',
+    };
+  } catch (error) {
+    console.error('[cPanel API] Error fetching all invoices:', error);
+    return {
+      success: false,
+      invoices: [],
+      error: error.message,
+    };
   }
 };
 
@@ -545,5 +605,6 @@ export default {
   checkSyncStatus,
   fetchCPanelInvoiceId,
   fetchInvoiceFromCPanel,
+  fetchAllCPanelInvoices,
   isCPanelConfigured,
 };

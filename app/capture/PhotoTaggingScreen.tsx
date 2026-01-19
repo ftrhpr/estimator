@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
     Alert,
     Dimensions,
@@ -32,6 +32,8 @@ import { ServiceService } from '../../src/services/serviceService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width, height } = Dimensions.get('window');
+
+export const options = () => ({ title: 'Tag Photo' });
 
 interface PhotoTag {
   id: string;
@@ -203,6 +205,14 @@ export default function PhotoTaggingScreen() {
       setMockPhotos();
     }
   }, [params.photos]);
+
+  const navigation = useNavigation();
+  useLayoutEffect(() => {
+    const current = photos?.[currentPhotoIndex];
+    const angle = current?.angle || 'Tag Photo';
+    const counter = photos?.length ? ` (${currentPhotoIndex + 1}/${photos.length})` : '';
+    navigation.setOptions({ title: `${angle}${counter}` });
+  }, [photos, currentPhotoIndex, navigation]);
 
   const handlePhotoPress = (event: any) => {
     const { locationX, locationY } = event.nativeEvent;

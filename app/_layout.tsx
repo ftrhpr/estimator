@@ -33,6 +33,11 @@ export default function RootLayout() {
           <Stack.Screen name="estimation/SummaryScreen" options={{
             title: 'Estimate Summary',
           }} />
+
+          <Stack.Screen name="cases/[id]" options={{
+            title: '',
+            headerBackTitle: 'უკან',
+          }} />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>

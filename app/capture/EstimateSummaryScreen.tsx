@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
     Alert,
     Dimensions,
@@ -15,6 +15,7 @@ import {
     Appbar,
     Button,
     Card,
+    Checkbox,
     Chip,
     Divider,
     IconButton,
@@ -33,6 +34,8 @@ import { StorageService } from '../../src/services/storageService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width } = Dimensions.get('window');
+
+export const options = () => ({ title: 'Estimate Summary' });
 
 interface EstimateItem {
   id: string;
@@ -103,6 +106,10 @@ export default function EstimateSummaryScreen() {
   const [servicesDiscount, setServicesDiscount] = useState('0');
   const [partsDiscount, setPartsDiscount] = useState('0');
   const [globalDiscount, setGlobalDiscount] = useState('0');
+
+  // VAT state
+  const [includeVAT, setIncludeVAT] = useState(false);
+  const VAT_RATE = 0.18; // 18% VAT
   
   const cameraRef = useRef<CameraView>(null);
 
@@ -145,17 +152,16 @@ export default function EstimateSummaryScreen() {
         setEstimateItems(items);
         setPhotosData(data.photos || []);
         setPartsData(data.parts || []);
+
         // Load inventory parts if available - ensure each part has an ID and required fields
         // NOTE: data.parts from PhotoTaggingScreen contains damage tagging data (partName, damages),
         // NOT inventory parts. Only load as inventory parts if they have the correct structure.
-        if (data.parts && Array.isArray(data.parts)) {
-          // Filter to only include actual inventory parts (have unitPrice or quantity fields)
-          // Exclude damage tagging data which has partName and damages fields
-          const inventoryParts = data.parts.filter((p: any) => 
-            (p.unitPrice !== undefined || p.unit_price !== undefined || p.name !== undefined) && 
+        if (Array.isArray(data.parts)) {
+          const inventoryParts = data.parts.filter((p: any) =>
+            (p.unitPrice !== undefined || p.unit_price !== undefined || p.name !== undefined) &&
             !p.damages && !p.partName
           );
-          
+
           if (inventoryParts.length > 0) {
             const partsWithIds = inventoryParts.map((p: any, idx: number) => ({
               id: p.id || `loaded-part-${idx}-${Date.now()}`,
@@ -181,6 +187,13 @@ export default function EstimateSummaryScreen() {
     }
   }, [params.estimateData]);
 
+  const navigation = useNavigation();
+  useLayoutEffect(() => {
+    const title = customerName || plate || 'Estimate Summary';
+    const itemCount = estimateItems?.length ? ` (${estimateItems.length})` : '';
+    navigation.setOptions({ title: `${title}${itemCount}` });
+  }, [customerName, plate, estimateItems, navigation]);
+
   const getServicesTotal = () => {
     const subtotal = estimateItems.reduce((total, item) => total + item.price, 0);
     const discount = (parseFloat(servicesDiscount) || 0) / 100;
@@ -193,11 +206,19 @@ export default function EstimateSummaryScreen() {
     return Math.max(0, subtotal - (subtotal * discount));
   };
 
-  const getTotalPrice = () => {
+  const getSubtotalAfterDiscounts = () => {
     const subtotal = getServicesTotal() + getPartsTotal();
     const globalDiscountPercent = (parseFloat(globalDiscount) || 0) / 100;
-    const finalTotal = Math.max(0, subtotal - (subtotal * globalDiscountPercent));
-    return finalTotal;
+    return Math.max(0, subtotal - (subtotal * globalDiscountPercent));
+  };
+
+  const getVATAmount = () => {
+    if (!includeVAT) return 0;
+    return getSubtotalAfterDiscounts() * VAT_RATE;
+  };
+
+  const getTotalPrice = () => {
+    return getSubtotalAfterDiscounts() + getVATAmount();
   };
 
   // Parts management functions
@@ -567,6 +588,8 @@ export default function EstimateSummaryScreen() {
       }));
 
       // Prepare invoice data with uploaded photo URLs
+      // partsData contains damage tagging info (partName, damages with photoIndex)
+      // partsForSync contains inventory parts (name, quantity, unitPrice)
       const invoiceData = {
         customerName: customerInfo.name || customerName || 'N/A',
         customerPhone: customerInfo.phone,
@@ -580,11 +603,17 @@ export default function EstimateSummaryScreen() {
         partsTotal: getPartsTotal(),
         services: allServices,
         photos: uploadedPhotos.length > 0 ? uploadedPhotos : photosData,
-        parts: partsForSync,
+        parts: partsData,
+        inventoryParts: partsForSync,
         // Discounts
         services_discount_percent: parseFloat(servicesDiscount) || 0,
         parts_discount_percent: parseFloat(partsDiscount) || 0,
         global_discount_percent: parseFloat(globalDiscount) || 0,
+        // VAT
+        includeVAT: includeVAT,
+        vatRate: includeVAT ? VAT_RATE : 0,
+        vatAmount: getVATAmount(),
+        subtotalBeforeVAT: getSubtotalAfterDiscounts(),
         status: 'Pending',
         isRepeatCustomer: customerInfo.isRepeat,
         createdAt: new Date().toISOString(),
@@ -755,6 +784,22 @@ export default function EstimateSummaryScreen() {
                   </Text>
                 )}
               </View>
+            </View>
+
+            {/* VAT Checkbox */}
+            <Divider style={{ marginVertical: SPACING.sm }} />
+            <View style={styles.vatRow}>
+              <View style={styles.vatCheckboxContainer}>
+                <Checkbox
+                  status={includeVAT ? 'checked' : 'unchecked'}
+                  onPress={() => setIncludeVAT(!includeVAT)}
+                  color={COLORS.primary}
+                />
+                <Text style={styles.vatLabel}>დღგ +18%</Text>
+              </View>
+              {includeVAT && (
+                <Text style={styles.vatAmount}>+{formatCurrencyGEL(getVATAmount())}</Text>
+              )}
             </View>
           </Card.Content>
         </Card>
@@ -1450,6 +1495,27 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.error,
     fontWeight: '600',
+  },
+  vatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: SPACING.xs,
+  },
+  vatCheckboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  vatLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginLeft: SPACING.xs,
+  },
+  vatAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.success,
   },
   customerCard: {
     marginBottom: SPACING.lg,

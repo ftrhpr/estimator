@@ -1,6 +1,6 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { COLORS, SPACING } from '../../src/config/constants';
@@ -67,12 +67,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="admin/cpanel-inspections"
         options={{
-          title: 'Reports',
+          title: 'cPanel',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons 
-              name={focused ? 'chart-line' : 'chart-line-variant'} 
+              name={focused ? 'database' : 'database-outline'} 
               size={24} 
               color={color} 
             />

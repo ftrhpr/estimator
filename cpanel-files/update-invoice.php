@@ -65,11 +65,17 @@ try {
         'services_discount_percent' => 'services_discount_percent',
         'parts_discount_percent' => 'parts_discount_percent',
         'global_discount_percent' => 'global_discount_percent',
+        'includeVAT' => 'vat_enabled',
+        'vatAmount' => 'vat_amount',
+        'vatRate' => 'vat_rate',
+        'subtotalBeforeVAT' => 'subtotal_before_vat',
+        'internalNotes' => 'internalNotes',
     ];
     
     // Debug: Log all received data keys and image fields
     error_log("=== UPDATE INVOICE - DATA RECEIVED ===");
     error_log("All keys: " . implode(', ', array_keys($data)));
+    error_log("VAT fields - includeVAT: " . ($data['includeVAT'] ?? 'NOT_SET') . ", vatAmount: " . ($data['vatAmount'] ?? 'NOT_SET') . ", vatRate: " . ($data['vatRate'] ?? 'NOT_SET') . ", subtotalBeforeVAT: " . ($data['subtotalBeforeVAT'] ?? 'NOT_SET'));
     error_log("Received data - vehicleMake: " . ($data['vehicleMake'] ?? 'NULL') . ", vehicleModel: " . ($data['vehicleModel'] ?? 'NULL'));
     
     // Check for image fields
@@ -89,12 +95,48 @@ try {
             continue;
         }
         
-        if (isset($data[$appField]) && $data[$appField] !== null && $data[$appField] !== '') {
-            $value = $data[$appField];
+        // Special handling for fields that can be null or need special processing
+        $shouldProcess = false;
+        if (in_array($dbField, ['vat_enabled', 'vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
+            $shouldProcess = array_key_exists($appField, $data);
+        } elseif (in_array($dbField, ['repair_status', 'user_response', 'status'])) {
+            // These fields should be processed even if they are null (to allow clearing)
+            $shouldProcess = array_key_exists($appField, $data);
+        } else {
+            $shouldProcess = isset($data[$appField]) && $data[$appField] !== null;
+        }
+        
+        if ($shouldProcess) {
+            $value = $data[$appField] ?? null;
             
-            // Handle discount fields as floats
-            if (in_array($dbField, ['services_discount_percent', 'parts_discount_percent', 'global_discount_percent'])) {
-                $value = floatval($value);
+            // Debug VAT fields specifically
+            if (in_array($dbField, ['vat_enabled', 'vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
+                error_log("Processing VAT field $appField -> $dbField with value: " . json_encode($value) . " (type: " . gettype($value) . ")");
+            }
+            
+            // Handle discount and VAT fields as floats - allow empty strings to be 0
+            if (in_array($dbField, ['services_discount_percent', 'parts_discount_percent', 'global_discount_percent', 'vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
+                $value = floatval($value ?? 0);
+                if (in_array($dbField, ['vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
+                    error_log("Converted VAT field $dbField to float: $value");
+                }
+            }
+            // Handle boolean VAT enabled field
+            elseif ($dbField === 'vat_enabled') {
+                // Handle both boolean and string values
+                if (is_bool($value)) {
+                    $value = $value ? 1 : 0;
+                } elseif (is_string($value)) {
+                    $value = ($value === 'true' || $value === '1') ? 1 : 0;
+                } else {
+                    $value = intval($value ?? 0);
+                }
+                error_log("Converted VAT enabled to int: $value (from " . json_encode($data[$appField]) . ")");
+            }
+            // Handle internalNotes as JSON array
+            elseif ($dbField === 'internalNotes' && is_array($value)) {
+                $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+                error_log("Internal notes transformed for update: " . $value);
             }
             // Handle JSON fields for arrays
             elseif (is_array($value) && in_array($dbField, ['repair_labor', 'repair_parts', 'case_images'])) {
@@ -105,7 +147,7 @@ try {
                     $transformedServices = array_map(function($service) {
                         // Log incoming service data for debugging
                         error_log("Processing service: " . json_encode($service, JSON_UNESCAPED_UNICODE));
-                        
+
                         // Prefer Georgian name, fallback to English, with better empty string handling
                         $serviceName = '';
                         

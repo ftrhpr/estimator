@@ -1,11 +1,13 @@
-import React from 'react';
-import { View, Text } from 'react-native';
+import { router } from 'expo-router';
+import React, { useEffect } from 'react';
+import { View } from 'react-native';
 
-export default function HomeScreen() {
-  return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' }}>
-      <Text style={{ fontSize: 24, color: 'blue' }}>Hello World!</Text>
-      <Text style={{ fontSize: 16, color: 'gray', marginTop: 10 }}>App is running</Text>
-    </View>
-  );
+// Deprecated backup index — redirect to main index to avoid exposing in menus
+export default function IndexBackupRedirect() {
+  useEffect(() => {
+    console.warn('Deprecated route visited: /index_backup — redirecting to /');
+    router.replace('/');
+  }, []);
+
+  return <View />;
 }

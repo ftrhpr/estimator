@@ -1,34 +1,32 @@
-import React, { useState, useRef, useCallback } from 'react';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { Audio } from 'expo-av';
+import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
+import { router, useNavigation } from 'expo-router';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
-  View,
-  StyleSheet,
-  Dimensions,
-  TouchableOpacity,
-  Alert,
-  Vibration,
-  Image,
-  FlatList,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    StyleSheet,
+    TouchableOpacity,
+    Vibration,
+    View,
 } from 'react-native';
 import {
-  Appbar,
-  Text,
-  FAB,
-  Card,
-  IconButton,
-  Chip,
-  Portal,
-  Modal,
-  Button,
-  ActivityIndicator,
+    ActivityIndicator,
+    Appbar,
+    Button,
+    Chip,
+    IconButton,
+    Modal,
+    Portal,
+    Text
 } from 'react-native-paper';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 
-import { COLORS, SPACING, BORDER_RADIUS, TYPOGRAPHY } from '../../src/config/constants';
+import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 
 const { width, height } = Dimensions.get('window');
 
@@ -50,6 +48,8 @@ const QUICK_ANGLES = [
 ];
 
 const DAMAGE_INDEX = 4; // Index of "Damage Detail"
+
+export const options = () => ({ title: 'Quick Capture' });
 
 export default function QuickCaptureScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -87,6 +87,13 @@ export default function QuickCaptureScreen() {
     }, [permission])
   );
 
+  const navigation = useNavigation();
+  useLayoutEffect(() => {
+    const angleLabel = currentAngle || 'Quick Capture';
+    const photosLabel = photos?.length ? ` (${photos.length})` : '';
+    navigation.setOptions({ title: `${angleLabel}${photosLabel}` });
+  }, [currentAngle, photos, navigation]);
+
   const handlePickFromGallery = async () => {
     try {
       setIsCapturing(true);
@@ -104,7 +111,7 @@ export default function QuickCaptureScreen() {
 
       // Launch image picker
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: false,
         quality: 0.8,
         allowsMultipleSelection: false,

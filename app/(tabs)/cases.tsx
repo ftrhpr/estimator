@@ -7,7 +7,10 @@ import {
     Dimensions,
     FlatList,
     Linking,
+    Modal,
     RefreshControl,
+    ScrollView,
+    Share,
     StyleSheet,
     TouchableOpacity,
     View
@@ -28,7 +31,7 @@ import {
 
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
-import { fetchInvoiceFromCPanel } from '../../src/services/cpanelService';
+import { fetchInvoiceFromCPanel, fetchAllCPanelInvoices } from '../../src/services/cpanelService';
 import { getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
@@ -54,6 +57,7 @@ interface InspectionCase {
   services?: Array<{ serviceName: string; price: number; count: number; key?: string }>;
   parts?: any[];
   status: string;
+  repair_status?: string | null;
   createdAt: string;
   updatedAt: string;
   cpanelInvoiceId?: string;
@@ -62,16 +66,20 @@ interface InspectionCase {
 interface CaseWithDetails extends InspectionCase {
   statusColor: string;
   statusLabel: string;
+  source: 'firebase' | 'cpanel';
 }
 
 export default function CasesScreen() {
   const [cases, setCases] = useState<CaseWithDetails[]>([]);
+  const [cpanelCases, setCpanelCases] = useState<CaseWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cpanelLoading, setCpanelLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMenuVisible, setFilterMenuVisible] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'cost_high' | 'cost_low'>('newest');
   const [showSearch, setShowSearch] = useState(false);
+  const [activeTab, setActiveTab] = useState<'firebase' | 'cpanel'>('firebase');
 
   // Filter states
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -80,12 +88,14 @@ export default function CasesScreen() {
   const [dateRangeFilter, setDateRangeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [caseStatusFilter, setCaseStatusFilter] = useState<'all' | 'Pending' | 'In Progress' | 'Completed'>('all');
   const [serviceFilterKey, setServiceFilterKey] = useState<string>('all');
+  const [repairStatusFilter, setRepairStatusFilter] = useState<string>('all');
+  const [workflowStatusFilter, setWorkflowStatusFilter] = useState<string>('all');
 
   const loadCases = async () => {
     try {
       setLoading(true);
       const inspections = await getAllInspections();
-      
+
       const casesWithDetails: CaseWithDetails[] = inspections.map((inspection: any) => ({
         id: inspection.id,
         customerName: inspection.customerName || 'N/A',
@@ -99,11 +109,13 @@ export default function CasesScreen() {
         services: inspection.services || [],
         parts: inspection.parts || [],
         status: inspection.status || 'Pending',
+        repair_status: inspection.repair_status || null,
         createdAt: inspection.createdAt,
         updatedAt: inspection.updatedAt,
         cpanelInvoiceId: inspection.cpanelInvoiceId || '',
         statusColor: getStatusColor(inspection.createdAt),
         statusLabel: getStatusLabel(inspection.createdAt),
+        source: 'firebase' as const,
       }));
 
       setCases(casesWithDetails);
@@ -116,9 +128,49 @@ export default function CasesScreen() {
     }
   };
 
+  const loadCpanelCases = async () => {
+    try {
+      setCpanelLoading(true);
+      const result: any = await fetchAllCPanelInvoices({ limit: 200, onlyCPanelOnly: true });
+
+      if (result.success && result.invoices) {
+        const cpanelCasesWithDetails: CaseWithDetails[] = result.invoices.map((invoice: any) => ({
+          id: invoice.cpanelId?.toString() || '',
+          customerName: invoice.customerName || 'N/A',
+          customerPhone: invoice.customerPhone || 'N/A',
+          carMake: invoice.carMake || '',
+          carModel: invoice.carModel || 'Unknown',
+          carMakeId: '',
+          carModelId: '',
+          plate: invoice.plate || invoice.carModel || 'N/A',
+          totalPrice: invoice.totalPrice || 0,
+          services: invoice.services || [],
+          parts: invoice.parts || [],
+          status: invoice.status || 'New',
+          repair_status: invoice.repair_status || null,
+          createdAt: invoice.createdAt,
+          updatedAt: invoice.updatedAt,
+          cpanelInvoiceId: invoice.cpanelId?.toString() || '',
+          statusColor: getStatusColor(invoice.createdAt),
+          statusLabel: getStatusLabel(invoice.createdAt),
+          source: 'cpanel' as const,
+        }));
+
+        setCpanelCases(cpanelCasesWithDetails);
+      } else {
+        setCpanelCases([]);
+      }
+    } catch (error) {
+      console.error('Error loading cPanel cases:', error);
+      setCpanelCases([]);
+    } finally {
+      setCpanelLoading(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadCases();
+    await Promise.all([loadCases(), loadCpanelCases()]);
     setRefreshing(false);
   };
 
@@ -212,6 +264,11 @@ export default function CasesScreen() {
 
       const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?slug=${slug}`;
 
+      await Share.share({
+        message: `📋 ინვოისი: ${item.customerName || 'მომხმარებელი'}\n🚗 ${item.plate || item.carModel || 'ავტომობილი'}\n💰 ჯამი: ${formatCurrencyGEL(item.totalPrice)}\n\n🔗 ლინკი: ${publicUrl}`,
+        url: publicUrl,
+        title: `ინვოისი #${item.id.slice(0, 8).toUpperCase()}`,
+      });
     } catch (error: any) {
       console.error('Error sharing link:', error);
       Alert.alert('❌ შეცდომა', 'ლინკის გაზიარება ვერ მოხერხდა');
@@ -255,6 +312,7 @@ export default function CasesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadCases();
+      loadCpanelCases();
     }, [])
   );
 
@@ -277,7 +335,8 @@ export default function CasesScreen() {
   };
 
   const filterAndSortCases = () => {
-    let filteredCases = cases.filter(caseItem => {
+    const sourceCases = activeTab === 'firebase' ? cases : cpanelCases;
+    let filteredCases = sourceCases.filter(caseItem => {
       // Search filter
       const searchLower = searchQuery.toLowerCase();
       const matchesSearch = !searchQuery || (
@@ -314,10 +373,18 @@ export default function CasesScreen() {
       const matchesCaseStatus = caseStatusFilter === 'all' || caseItem.status === caseStatusFilter;
 
       // Service category filter
-      const matchesService = serviceFilterKey === 'all' || 
+      const matchesService = serviceFilterKey === 'all' ||
         (caseItem.services?.some(s => s.key === serviceFilterKey) || false);
 
-      return matchesSearch && matchesStatus && matchesPriceRange && matchesDateRange && matchesCaseStatus && matchesService;
+      // Repair status filter
+      const matchesRepairStatus = repairStatusFilter === 'all' ||
+        (repairStatusFilter === 'none' ? !caseItem.repair_status : caseItem.repair_status === repairStatusFilter);
+
+      // Workflow status filter (filters by status field)
+      const matchesWorkflowStatus = workflowStatusFilter === 'all' ||
+        (workflowStatusFilter === 'none' ? !caseItem.status : caseItem.status === workflowStatusFilter);
+
+      return matchesSearch && matchesStatus && matchesPriceRange && matchesDateRange && matchesCaseStatus && matchesService && matchesRepairStatus && matchesWorkflowStatus;
     });
 
     // Sort cases
@@ -341,7 +408,7 @@ export default function CasesScreen() {
 
   const renderCaseCard = ({ item }: { item: CaseWithDetails }) => (
     <TouchableOpacity
-      onPress={() => router.push({ pathname: '/cases/[id]', params: { id: item.id } })}
+      onPress={() => router.push({ pathname: '/cases/[id]', params: { id: item.id, source: item.source } })}
       activeOpacity={0.7}
       style={styles.cardTouchable}
     >
@@ -469,6 +536,8 @@ export default function CasesScreen() {
     if (dateRangeFilter !== 'all') count++;
     if (caseStatusFilter !== 'all') count++;
     if (serviceFilterKey !== 'all') count++;
+    if (repairStatusFilter !== 'all') count++;
+    if (workflowStatusFilter !== 'all') count++;
     return count;
   };
 
@@ -478,6 +547,8 @@ export default function CasesScreen() {
     setDateRangeFilter('all');
     setCaseStatusFilter('all');
     setServiceFilterKey('all');
+    setRepairStatusFilter('all');
+    setWorkflowStatusFilter('all');
   };
 
   const hasActiveFilters = () => getActiveFilterCount() > 0;
@@ -531,9 +602,79 @@ export default function CasesScreen() {
         'Pending': 'მოლოდინში',
         'In Progress': 'მიმდინარე',
         'Completed': 'დასრულებული'
+      },
+      repairStatus: {
+        all: 'ყველა',
+        none: 'არ არის',
+        'New': 'ახალი',
+        'In Progress': 'მიმდინარე',
+        'Completed': 'დასრულებული',
+        'Cancelled': 'გაუქმებული'
+      },
+      workflowStatus: {
+        all: 'ყველა',
+        none: 'არ არის',
+        'New': 'ახალი',
+        'Processing': 'მუშავდება',
+        'Contacted': 'დარეკილი',
+        'Parts ordered': 'შეკვეთილია ნაწილები',
+        'Parts Arrived': 'ჩამოსულია ნაწილები',
+        'Scheduled': 'დაბარებული',
+        'Completed': 'დასრულებული',
+        'Issue': 'პრობლემა'
       }
     };
     return filterLabels[filterType]?.[value] || value;
+  };
+
+  // Repair status options for filter
+  const repairStatusOptions = [
+    { value: 'all', label: 'ყველა' },
+    { value: 'none', label: 'არ არის' },
+    { value: 'New', label: 'ახალი' },
+    { value: 'In Progress', label: 'მიმდინარე' },
+    { value: 'Completed', label: 'დასრულებული' },
+    { value: 'Cancelled', label: 'გაუქმებული' },
+  ];
+
+  // Workflow status options for filter (case status from CPanel)
+  const workflowStatusOptions = [
+    { value: 'all', label: 'ყველა' },
+    { value: 'none', label: 'არ არის' },
+    { value: 'New', label: 'ახალი' },
+    { value: 'Processing', label: 'მუშავდება' },
+    { value: 'Contacted', label: 'დარეკილი' },
+    { value: 'Parts ordered', label: 'შეკვეთილია ნაწილები' },
+    { value: 'Parts Arrived', label: 'ჩამოსულია ნაწილები' },
+    { value: 'Scheduled', label: 'დაბარებული' },
+    { value: 'Completed', label: 'დასრულებული' },
+    { value: 'Issue', label: 'პრობლემა' },
+  ];
+
+  // Get color for repair status
+  const getRepairStatusColor = (status: string | null | undefined): string => {
+    switch (status) {
+      case 'New': return '#3B82F6';
+      case 'In Progress': return '#F59E0B';
+      case 'Completed': return '#10B981';
+      case 'Cancelled': return '#EF4444';
+      default: return '#94A3B8';
+    }
+  };
+
+  // Get color for workflow status
+  const getWorkflowStatusColor = (status: string | null | undefined): string => {
+    switch (status) {
+      case 'New': return '#3B82F6';
+      case 'Processing': return '#8B5CF6';
+      case 'Contacted': return '#06B6D4';
+      case 'Parts ordered': return '#F59E0B';
+      case 'Parts Arrived': return '#22C55E';
+      case 'Scheduled': return '#6366F1';
+      case 'Completed': return '#10B981';
+      case 'Issue': return '#EF4444';
+      default: return '#94A3B8';
+    }
   };
 
   if (loading && !refreshing) {
@@ -561,6 +702,19 @@ export default function CasesScreen() {
               onPress={() => setShowSearch(!showSearch)}
               iconColor={COLORS.text.primary}
             />
+            <View>
+              <IconButton
+                icon="filter-variant"
+                size={24}
+                onPress={() => setShowFilterModal(true)}
+                iconColor={hasActiveFilters() ? COLORS.primary : COLORS.text.primary}
+              />
+              {hasActiveFilters() && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{getActiveFilterCount()}</Text>
+                </View>
+              )}
+            </View>
             <Menu
               visible={filterMenuVisible}
               onDismiss={() => setFilterMenuVisible(false)}
@@ -609,6 +763,37 @@ export default function CasesScreen() {
             iconColor={COLORS.text.secondary}
           />
         )}
+
+        {/* Tab Switcher */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'firebase' && styles.activeTab]}
+            onPress={() => setActiveTab('firebase')}
+          >
+            <MaterialCommunityIcons
+              name="firebase"
+              size={18}
+              color={activeTab === 'firebase' ? COLORS.primary : COLORS.text.secondary}
+            />
+            <Text style={[styles.tabText, activeTab === 'firebase' && styles.activeTabText]}>
+              Firebase ({cases.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'cpanel' && styles.activeTab]}
+            onPress={() => setActiveTab('cpanel')}
+          >
+            <MaterialCommunityIcons
+              name="server"
+              size={18}
+              color={activeTab === 'cpanel' ? COLORS.primary : COLORS.text.secondary}
+            />
+            <Text style={[styles.tabText, activeTab === 'cpanel' && styles.activeTabText]}>
+              CPanel ({cpanelCases.length})
+            </Text>
+            {cpanelLoading && <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />}
+          </TouchableOpacity>
+        </View>
 
         {/* Stats Row */}
         <View style={styles.statsRow}>
@@ -676,6 +861,181 @@ export default function CasesScreen() {
         label="ახალი"
         color="#fff"
       />
+
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>ფილტრები</Text>
+              <IconButton
+                icon="close"
+                size={24}
+                onPress={() => setShowFilterModal(false)}
+              />
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Repair Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>რემონტის სტატუსი</Text>
+                <View style={styles.filterChipsRow}>
+                  {repairStatusOptions.map((option) => (
+                    <Chip
+                      key={option.value}
+                      mode={repairStatusFilter === option.value ? 'flat' : 'outlined'}
+                      selected={repairStatusFilter === option.value}
+                      onPress={() => setRepairStatusFilter(option.value)}
+                      style={[
+                        styles.filterChip,
+                        repairStatusFilter === option.value && {
+                          backgroundColor: getRepairStatusColor(option.value === 'all' || option.value === 'none' ? null : option.value) + '20'
+                        }
+                      ]}
+                      textStyle={[
+                        styles.filterChipText,
+                        repairStatusFilter === option.value && {
+                          color: getRepairStatusColor(option.value === 'all' || option.value === 'none' ? null : option.value)
+                        }
+                      ]}
+                    >
+                      {option.label}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+
+              {/* Workflow Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>საქმის სტატუსი</Text>
+                <View style={styles.filterChipsRow}>
+                  {workflowStatusOptions.map((option) => (
+                    <Chip
+                      key={option.value}
+                      mode={workflowStatusFilter === option.value ? 'flat' : 'outlined'}
+                      selected={workflowStatusFilter === option.value}
+                      onPress={() => setWorkflowStatusFilter(option.value)}
+                      style={[
+                        styles.filterChip,
+                        workflowStatusFilter === option.value && {
+                          backgroundColor: getWorkflowStatusColor(option.value === 'all' || option.value === 'none' ? null : option.value) + '20'
+                        }
+                      ]}
+                      textStyle={[
+                        styles.filterChipText,
+                        workflowStatusFilter === option.value && {
+                          color: getWorkflowStatusColor(option.value === 'all' || option.value === 'none' ? null : option.value)
+                        }
+                      ]}
+                    >
+                      {option.label}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+
+              {/* Case Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>საქმის სტატუსი</Text>
+                <View style={styles.filterChipsRow}>
+                  {(['all', 'Pending', 'In Progress', 'Completed'] as const).map((status) => (
+                    <Chip
+                      key={status}
+                      mode={caseStatusFilter === status ? 'flat' : 'outlined'}
+                      selected={caseStatusFilter === status}
+                      onPress={() => setCaseStatusFilter(status)}
+                      style={[
+                        styles.filterChip,
+                        caseStatusFilter === status && styles.filterChipSelected
+                      ]}
+                      textStyle={[
+                        styles.filterChipText,
+                        caseStatusFilter === status && styles.filterChipTextSelected
+                      ]}
+                    >
+                      {getFilterLabel('caseStatus', status)}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+
+              {/* Age Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>ხანდაზმულობა</Text>
+                <View style={styles.filterChipsRow}>
+                  {(['all', 'today', 'recent', 'old'] as const).map((status) => (
+                    <Chip
+                      key={status}
+                      mode={statusFilter === status ? 'flat' : 'outlined'}
+                      selected={statusFilter === status}
+                      onPress={() => setStatusFilter(status)}
+                      style={[
+                        styles.filterChip,
+                        statusFilter === status && styles.filterChipSelected
+                      ]}
+                      textStyle={[
+                        styles.filterChipText,
+                        statusFilter === status && styles.filterChipTextSelected
+                      ]}
+                    >
+                      {getFilterLabel('status', status)}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+
+              {/* Price Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>ფასის დიაპაზონი</Text>
+                <View style={styles.filterChipsRow}>
+                  {(['all', 'low', 'medium', 'high'] as const).map((range) => (
+                    <Chip
+                      key={range}
+                      mode={priceRangeFilter === range ? 'flat' : 'outlined'}
+                      selected={priceRangeFilter === range}
+                      onPress={() => setPriceRangeFilter(range)}
+                      style={[
+                        styles.filterChip,
+                        priceRangeFilter === range && styles.filterChipSelected
+                      ]}
+                      textStyle={[
+                        styles.filterChipText,
+                        priceRangeFilter === range && styles.filterChipTextSelected
+                      ]}
+                    >
+                      {getFilterLabel('price', range)}
+                    </Chip>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Filter Modal Actions */}
+            <View style={styles.filterModalActions}>
+              <Button
+                mode="outlined"
+                onPress={clearAllFilters}
+                style={styles.filterClearButton}
+                disabled={!hasActiveFilters()}
+              >
+                გასუფთავება
+              </Button>
+              <Button
+                mode="contained"
+                onPress={() => setShowFilterModal(false)}
+                style={styles.filterApplyButton}
+              >
+                მიღება ({filteredCases.length})
+              </Button>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -733,6 +1093,40 @@ const styles = StyleSheet.create({
   searchInput: {
     fontSize: 15,
     minHeight: 48,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginTop: 12,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    gap: 6,
+  },
+  activeTab: {
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  activeTabText: {
+    color: COLORS.primary,
   },
   statsRow: {
     flexDirection: 'row',
@@ -971,5 +1365,102 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+
+  // Filter Badge
+  filterBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  // Filter Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  filterModal: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  filterModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  filterModalContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  filterChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    marginBottom: 4,
+  },
+  filterChipSelected: {
+    backgroundColor: COLORS.primary + '20',
+  },
+  filterChipText: {
+    fontSize: 13,
+  },
+  filterChipTextSelected: {
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    gap: 12,
+  },
+  filterClearButton: {
+    flex: 1,
+    borderRadius: 12,
+  },
+  filterApplyButton: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
   },
 });
