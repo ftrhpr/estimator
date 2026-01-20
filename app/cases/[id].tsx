@@ -832,6 +832,106 @@ export default function CaseDetailScreen() {
   };
 
   // Silent background sync from cPanel (no alerts, used on load)
+
+  // Helper: Detect what types of changes exist between cPanel and local data
+  const detectSyncChanges = (cpanelData: any, currentData: any) => {
+    const hasGlobalDiscountChanges =
+      cpanelData.services_discount_percent !== (currentData.services_discount_percent || 0) ||
+      cpanelData.parts_discount_percent !== (currentData.parts_discount_percent || 0) ||
+      cpanelData.global_discount_percent !== (currentData.global_discount_percent || 0);
+
+    const hasVATChanges =
+      cpanelData.includeVAT !== (currentData.includeVAT || false) ||
+      cpanelData.vatAmount !== (currentData.vatAmount || 0) ||
+      cpanelData.vatRate !== (currentData.vatRate || 0) ||
+      cpanelData.subtotalBeforeVAT !== (currentData.subtotalBeforeVAT || 0);
+
+    const hasWorkflowStatusChanges =
+      cpanelData.repair_status !== (currentData.repair_status || null) ||
+      cpanelData.status !== (currentData.status || 'New');
+
+    const cpanelNotes = cpanelData.internalNotes || [];
+    const currentNotes = currentData.internalNotes || [];
+    const hasInternalNotesChanges = JSON.stringify(cpanelNotes) !== JSON.stringify(currentNotes);
+
+    const cpanelServices = cpanelData.services || [];
+    const currentServices = currentData.services || [];
+    const hasServiceDiscountChanges = detectServiceDiscountChanges(cpanelServices, currentServices);
+
+    return {
+      hasGlobalDiscountChanges,
+      hasVATChanges,
+      hasWorkflowStatusChanges,
+      hasInternalNotesChanges,
+      hasServiceDiscountChanges,
+      hasAnyChanges: hasGlobalDiscountChanges || hasVATChanges || hasWorkflowStatusChanges ||
+                     hasInternalNotesChanges || hasServiceDiscountChanges,
+      cpanelNotes,
+    };
+  };
+
+  // Helper: Check if service discounts have changed
+  const detectServiceDiscountChanges = (cpanelServices: any[], currentServices: any[]) => {
+    if (cpanelServices.length !== currentServices.length) {
+      return false;
+    }
+
+    for (let i = 0; i < cpanelServices.length; i++) {
+      const cpanelDiscount = cpanelServices[i].discount_percent || 0;
+      const currentDiscount = currentServices[i].discount_percent || 0;
+      if (cpanelDiscount !== currentDiscount) {
+        console.log(`[Case Detail] Silent sync: Service ${i} discount changed: ${currentDiscount} -> ${cpanelDiscount}`);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Helper: Merge service discounts from cPanel into current services
+  const mergeServiceDiscounts = (currentServices: any[], cpanelServices: any[]) => {
+    return currentServices.map((service: any, index: number) => {
+      if (cpanelServices[index]) {
+        return {
+          ...service,
+          discount_percent: cpanelServices[index].discount_percent || 0,
+          discountedPrice: cpanelServices[index].discountedPrice || service.price,
+        };
+      }
+      return service;
+    });
+  };
+
+  // Helper: Build the update payload for Firebase and state
+  const buildSyncUpdatePayload = (cpanelData: any, currentData: any, updatedServices: any[], cpanelNotes: any[]) => {
+    return {
+      services: updatedServices,
+      services_discount_percent: cpanelData.services_discount_percent ?? 0,
+      parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
+      global_discount_percent: cpanelData.global_discount_percent ?? 0,
+      includeVAT: cpanelData.includeVAT ?? false,
+      vatAmount: cpanelData.vatAmount ?? 0,
+      vatRate: cpanelData.vatRate ?? 0,
+      subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
+      totalPrice: cpanelData.totalPrice || currentData.totalPrice,
+      repair_status: cpanelData.repair_status ?? null,
+      status: cpanelData.status ?? currentData.status,
+      internalNotes: cpanelNotes,
+    };
+  };
+
+  // Helper: Apply all state updates in one place
+  const applyStateUpdates = (updatePayload: any) => {
+    setServicesDiscount(String(updatePayload.services_discount_percent || 0));
+    setPartsDiscount(String(updatePayload.parts_discount_percent || 0));
+    setGlobalDiscount(String(updatePayload.global_discount_percent || 0));
+    setIncludeVAT(updatePayload.includeVAT || false);
+    setRepairStatus(updatePayload.repair_status ?? null);
+    setCaseStatus(updatePayload.status ?? null);
+    setInternalNotes(updatePayload.internalNotes || []);
+    setEditedServices(updatePayload.services);
+    setCaseData((prev: any) => ({ ...prev, ...updatePayload }));
+  };
+
   const silentSyncFromCPanel = async (cpanelId: string, currentData: any) => {
     try {
       const { fetchInvoiceFromCPanel } = require('../../src/services/cpanelService');
@@ -844,114 +944,29 @@ export default function CaseDetailScreen() {
 
       console.log('[Case Detail] Silent sync: Comparing cPanel data with local');
 
-      // Check if cPanel has different global discount values
-      const hasGlobalDiscountChanges = 
-        cpanelData.services_discount_percent !== (currentData.services_discount_percent || 0) ||
-        cpanelData.parts_discount_percent !== (currentData.parts_discount_percent || 0) ||
-        cpanelData.global_discount_percent !== (currentData.global_discount_percent || 0);
+      const changes = detectSyncChanges(cpanelData, currentData);
 
-      // Check if cPanel has different VAT values
-      const hasVATChanges =
-        cpanelData.includeVAT !== (currentData.includeVAT || false) ||
-        cpanelData.vatAmount !== (currentData.vatAmount || 0) ||
-        cpanelData.vatRate !== (currentData.vatRate || 0) ||
-        cpanelData.subtotalBeforeVAT !== (currentData.subtotalBeforeVAT || 0);
-
-      // Check if cPanel has different workflow status values
-      const hasWorkflowStatusChanges =
-        cpanelData.repair_status !== (currentData.repair_status || null) ||
-        cpanelData.status !== (currentData.status || 'New');
-
-      // Check if cPanel has different internal notes
-      const cpanelNotes = cpanelData.internalNotes || [];
-      const currentNotes = currentData.internalNotes || [];
-      const hasInternalNotesChanges = JSON.stringify(cpanelNotes) !== JSON.stringify(currentNotes);
-
-      // Check if cPanel services have different individual discounts
-      const cpanelServices = cpanelData.services || [];
-      const currentServices = currentData.services || [];
-      let hasServiceDiscountChanges = false;
-      
-      if (cpanelServices.length === currentServices.length) {
-        for (let i = 0; i < cpanelServices.length; i++) {
-          const cpanelDiscount = cpanelServices[i].discount_percent || 0;
-          const currentDiscount = currentServices[i].discount_percent || 0;
-          if (cpanelDiscount !== currentDiscount) {
-            hasServiceDiscountChanges = true;
-            console.log(`[Case Detail] Silent sync: Service ${i} discount changed: ${currentDiscount} -> ${cpanelDiscount}`);
-            break;
-          }
-        }
-      }
-
-      if (hasGlobalDiscountChanges || hasServiceDiscountChanges || hasVATChanges || hasWorkflowStatusChanges || hasInternalNotesChanges) {
-        console.log('[Case Detail] Silent sync: Changes detected, updating Firebase');
-        if (hasInternalNotesChanges) {
-          console.log('[Case Detail] Silent sync: Internal notes changed, syncing from CPanel');
-        }
-
-        // Merge individual service discounts from cPanel to current services
-        const updatedServices = currentServices.map((service: any, index: number) => {
-          if (cpanelServices[index]) {
-            return {
-              ...service,
-              discount_percent: cpanelServices[index].discount_percent || 0,
-              discountedPrice: cpanelServices[index].discountedPrice || service.price,
-            };
-          }
-          return service;
-        });
-
-        const { updateInspection } = require('../../src/services/firebase');
-        await updateInspection(id as string, {
-          services: updatedServices,
-          services_discount_percent: cpanelData.services_discount_percent ?? 0,
-          parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
-          global_discount_percent: cpanelData.global_discount_percent ?? 0,
-          includeVAT: cpanelData.includeVAT ?? false,
-          vatAmount: cpanelData.vatAmount ?? 0,
-          vatRate: cpanelData.vatRate ?? 0,
-          subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
-          totalPrice: cpanelData.totalPrice || currentData.totalPrice,
-          // Workflow statuses
-          repair_status: cpanelData.repair_status ?? null,
-          status: cpanelData.status ?? currentData.status,
-          // Internal notes
-          internalNotes: cpanelNotes,
-        });
-
-        // Update local state
-        setServicesDiscount(String(cpanelData.services_discount_percent || 0));
-        setPartsDiscount(String(cpanelData.parts_discount_percent || 0));
-        setGlobalDiscount(String(cpanelData.global_discount_percent || 0));
-        setIncludeVAT(cpanelData.includeVAT || false);
-        setRepairStatus(cpanelData.repair_status ?? null);
-        setCaseStatus(cpanelData.status ?? null);
-        // Sync internal notes from cPanel
-        if (cpanelData.internalNotes && Array.isArray(cpanelData.internalNotes)) {
-          setInternalNotes(cpanelData.internalNotes);
-        }
-        setCaseData((prev: any) => ({
-          ...prev,
-          services: updatedServices,
-          services_discount_percent: cpanelData.services_discount_percent ?? 0,
-          parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
-          global_discount_percent: cpanelData.global_discount_percent ?? 0,
-          includeVAT: cpanelData.includeVAT ?? false,
-          vatAmount: cpanelData.vatAmount ?? 0,
-          vatRate: cpanelData.vatRate ?? 0,
-          subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
-          totalPrice: cpanelData.totalPrice || prev.totalPrice,
-          repair_status: cpanelData.repair_status ?? null,
-          status: cpanelData.status ?? prev.status,
-          internalNotes: cpanelNotes,
-        }));
-        setEditedServices(updatedServices);
-
-        console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses and internal notes)');
-      } else {
+      if (!changes.hasAnyChanges) {
         console.log('[Case Detail] Silent sync: No changes detected');
+        return;
       }
+
+      console.log('[Case Detail] Silent sync: Changes detected, updating Firebase');
+      if (changes.hasInternalNotesChanges) {
+        console.log('[Case Detail] Silent sync: Internal notes changed, syncing from CPanel');
+      }
+
+      const currentServices = currentData.services || [];
+      const cpanelServices = cpanelData.services || [];
+      const updatedServices = mergeServiceDiscounts(currentServices, cpanelServices);
+      const updatePayload = buildSyncUpdatePayload(cpanelData, currentData, updatedServices, changes.cpanelNotes);
+
+      const { updateInspection } = require('../../src/services/firebase');
+      await updateInspection(id as string, updatePayload);
+
+      applyStateUpdates(updatePayload);
+
+      console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses and internal notes)');
     } catch (error) {
       console.error('[Case Detail] Silent sync error (non-blocking):', error);
       // Don't show error to user, this is a background sync
