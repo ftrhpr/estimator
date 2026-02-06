@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -33,14 +34,35 @@ import Reanimated, {
     withSpring
 } from 'react-native-reanimated';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
-import { fetchInvoiceFromCPanel } from '../../src/services/cpanelService';
+import { fetchInvoiceFromCPanel, fetchMechanicsFromCPanel } from '../../src/services/cpanelService';
 import { ServiceService } from '../../src/services/serviceService';
+import { sendCompletionSMS } from '../../src/services/smsService';
+import statusService, { Status } from '../../src/services/statusService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width, height } = Dimensions.get('window');
+
+// SMS Recipient interface
+interface SMSRecipient {
+  id: string;
+  name: string;
+  phone: string;
+  enabled: boolean;
+}
+
+// Default SMS recipients
+const DEFAULT_SMS_RECIPIENTS: SMSRecipient[] = [
+  { id: '1', name: 'თამუნა', phone: '598745777', enabled: true },
+  { id: '2', name: 'ნიკა', phone: '511144486', enabled: true },
+  { id: '3', name: 'სალარო', phone: '579191929', enabled: false },
+];
+
+const SMS_RECIPIENTS_STORAGE_KEY = 'smsRecipients';
 
 export const options = ({ params }: { params?: { id?: string } }) => {
   const id = params?.id;
@@ -67,6 +89,7 @@ export default function CaseDetailScreen() {
   const [editedCarMakeId, setEditedCarMakeId] = useState('');
   const [editedCarModelId, setEditedCarModelId] = useState('');
   const [editedPlate, setEditedPlate] = useState('');
+  const [nachrebiQty, setNachrebiQty] = useState('');
   const [showCarSelector, setShowCarSelector] = useState(false);
   const [showAddServiceModal, setShowAddServiceModal] = useState(false);
   const [newServiceName, setNewServiceName] = useState('');
@@ -87,9 +110,16 @@ export default function CaseDetailScreen() {
   const [editServicePrice, setEditServicePrice] = useState('');
   const [editServiceCount, setEditServiceCount] = useState('1');
   const [editServiceDiscount, setEditServiceDiscount] = useState('0');
+  const [editServiceBaseUnitPrice, setEditServiceBaseUnitPrice] = useState(0); // Track base unit price for accurate recalculation
 
   // Parts state
   const [caseParts, setCaseParts] = useState<any[]>([]);
+  const [showAddPartModal, setShowAddPartModal] = useState(false);
+  const [newPartNameInput, setNewPartNameInput] = useState('');
+  const [newPartNumberInput, setNewPartNumberInput] = useState('');
+  const [newPartPrice, setNewPartPrice] = useState('');
+  const [newPartQuantity, setNewPartQuantity] = useState('1');
+  const [newPartNotes, setNewPartNotes] = useState('');
 
   // Discounts state
   const [servicesDiscount, setServicesDiscount] = useState('0');
@@ -103,9 +133,39 @@ export default function CaseDetailScreen() {
   // Workflow status state (from cPanel)
   const [repairStatus, setRepairStatus] = useState<string | null>(null);
   const [caseStatus, setCaseStatus] = useState<string | null>(null);
+  const [repairStatusId, setRepairStatusId] = useState<number | null>(null);
+  const [caseStatusId, setCaseStatusId] = useState<number | null>(null);
   const [showWorkflowStatusModal, setShowWorkflowStatusModal] = useState(false);
   const [editingRepairStatus, setEditingRepairStatus] = useState<string | null>(null);
   const [editingCaseStatus, setEditingCaseStatus] = useState<string | null>(null);
+  const [editingRepairStatusId, setEditingRepairStatusId] = useState<number | null>(null);
+  const [editingCaseStatusId, setEditingCaseStatusId] = useState<number | null>(null);
+
+  // Statuses from database
+  const [caseStatuses, setCaseStatuses] = useState<Status[]>([]);
+  const [repairStatuses, setRepairStatuses] = useState<Status[]>([]);
+  const [loadingStatuses, setLoadingStatuses] = useState(false);
+
+  // Case type state (დაზღვევა / საცალო)
+  const [caseType, setCaseType] = useState<string | null>(null);
+  const [showCaseTypeModal, setShowCaseTypeModal] = useState(false);
+
+  // Assigned mechanic state
+  const [assignedMechanic, setAssignedMechanic] = useState<string | null>(null);
+  const [showMechanicModal, setShowMechanicModal] = useState(false);
+  const [editingMechanic, setEditingMechanic] = useState<string>('');
+  const [savingMechanic, setSavingMechanic] = useState(false);
+  const [mechanicOptions, setMechanicOptions] = useState<Array<{value: string | null; label: string}>>([
+    { value: null, label: 'არ არის მინიჭებული' }
+  ]);
+  const [loadingMechanics, setLoadingMechanics] = useState(false);
+
+  // Nachrebi Qty modal state
+  const [showNachrebiQtyModal, setShowNachrebiQtyModal] = useState(false);
+  const [editingNachrebiQty, setEditingNachrebiQty] = useState<string>('');
+
+  // Refresh state
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Photo upload state
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
@@ -116,6 +176,16 @@ export default function CaseDetailScreen() {
   const [showAddNoteModal, setShowAddNoteModal] = useState(false);
   const [newNoteText, setNewNoteText] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+
+  // Voice notes state
+  const [voiceNotes, setVoiceNotes] = useState<Array<{url: string; timestamp: string; authorName: string; duration?: number}>>([]);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState<Audio.Recording | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [savingVoiceNote, setSavingVoiceNote] = useState(false);
+  const [playingVoiceNote, setPlayingVoiceNote] = useState<string | null>(null);
+  const [soundObject, setSoundObject] = useState<Audio.Sound | null>(null);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Payments state
   const [payments, setPayments] = useState<Array<{
@@ -140,6 +210,14 @@ export default function CaseDetailScreen() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [loadingPayments, setLoadingPayments] = useState(false);
 
+  // SMS state
+  const [smsSent, setSmsSent] = useState(false);
+  const [sendingSms, setSendingSms] = useState(false);
+  const [smsSettingsVisible, setSmsSettingsVisible] = useState(false);
+  const [smsRecipients, setSmsRecipients] = useState<SMSRecipient[]>(DEFAULT_SMS_RECIPIENTS);
+  const [editingRecipient, setEditingRecipient] = useState<string | null>(null);
+  const [editingPhone, setEditingPhone] = useState('');
+
   // Tagging state
   const [showTagWorkModal, setShowTagWorkModal] = useState(false);
   const [taggingMode, setTaggingMode] = useState(false);
@@ -158,6 +236,7 @@ export default function CaseDetailScreen() {
 
   useEffect(() => {
     loadCaseDetails();
+    loadStatuses(); // Load statuses when component mounts
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 400,
@@ -178,6 +257,23 @@ export default function CaseDetailScreen() {
     }
   }, [caseData, id, navigation]);
 
+  // Refresh function to reload case data from CPanel/Firebase
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+
+    setIsRefreshing(true);
+    try {
+      console.log('[Case Detail] Manual refresh triggered');
+      await loadCaseDetails();
+      console.log('[Case Detail] Manual refresh completed');
+    } catch (error) {
+      console.error('[Case Detail] Refresh error:', error);
+      Alert.alert('შეცდომა', 'მონაცემების განახლება ვერ მოხერხდა');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const getServiceNameGeorgian = (serviceName: string): string => {
     if (!serviceName) return '';
     for (const key of Object.keys(DEFAULT_SERVICES)) {
@@ -195,7 +291,7 @@ export default function CaseDetailScreen() {
     
     // Map Georgian workflow statuses to colors
     const statusColors: { [key: string]: string } = {
-      'წიანსწარი შეფასება': '#6366F1', // Blue - Initial assessment
+      'წინასწარი შეფასება': '#6366F1', // Blue - Initial assessment
       'მუშავდება': '#8B5CF6', // Purple - Starting work
       'იღებება': '#F59E0B', // Orange - Taking parts
       'იშლება': '#F59E0B', // Orange - Dismantling
@@ -224,6 +320,7 @@ export default function CaseDetailScreen() {
       case 'Parts ordered': return '#F59E0B';
       case 'Parts Arrived': return '#22C55E';
       case 'Scheduled': return '#6366F1';
+      case 'In Service': return '#EC4899';
       case 'Completed': return '#10B981';
       case 'Issue': return '#EF4444';
       default: return '#94A3B8';
@@ -239,6 +336,7 @@ export default function CaseDetailScreen() {
       case 'Parts ordered': return 'შეკვეთილია ნაწილები';
       case 'Parts Arrived': return 'ჩამოსულია ნაწილები';
       case 'Scheduled': return 'დაბარებული';
+      case 'In Service': return 'სერვისშია';
       case 'Completed': return 'დასრულებული';
       case 'Issue': return 'პრობლემა';
       default: return status;
@@ -248,7 +346,7 @@ export default function CaseDetailScreen() {
   // Workflow status options
   const repairStatusOptions = [
     { value: null, label: 'არ არის' },
-    { value: 'წიანსწარი შეფასება', label: 'წიანსწარი შეფასება' },
+    { value: 'წინასწარი შეფასება', label: 'წინასწარი შეფასება' },
     { value: 'მუშავდება', label: 'მუშავდება' },
     { value: 'იღებება', label: 'იღებება' },
     { value: 'იშლება', label: 'იშლება' },
@@ -267,13 +365,39 @@ export default function CaseDetailScreen() {
     { value: 'Parts ordered', label: 'შეკვეთილია ნაწილები', icon: 'cart-arrow-down', color: '#F59E0B' },
     { value: 'Parts Arrived', label: 'ჩამოსულია ნაწილები', icon: 'package-variant-closed-check', color: '#22C55E' },
     { value: 'Scheduled', label: 'დაბარებული', icon: 'calendar-check', color: '#6366F1' },
+    { value: 'In Service', label: 'სერვისშია', icon: 'car-wrench', color: '#EC4899' },
     { value: 'Completed', label: 'დასრულებული', icon: 'check-circle', color: '#10B981' },
     { value: 'Issue', label: 'პრობლემა', icon: 'alert-circle', color: '#EF4444' },
   ];
 
+  // Case type options
+  const caseTypeOptions = [
+    { value: null, label: 'არ არის', icon: 'minus-circle-outline', color: '#94A3B8' },
+    { value: 'დაზღვევა', label: 'დაზღვევა', icon: 'shield-car', color: '#3B82F6' },
+    { value: 'საცალო', label: 'საცალო', icon: 'cash', color: '#10B981' },
+  ];
+
+  const getCaseTypeColor = (type: string | null): string => {
+    const option = caseTypeOptions.find(opt => opt.value === type);
+    return option?.color || '#94A3B8';
+  };
+
+  const getCaseTypeLabel = (type: string | null): string => {
+    if (!type) return 'არ არის';
+    const option = caseTypeOptions.find(opt => opt.value === type);
+    return option?.label || type;
+  };
+
+  const getCaseTypeIcon = (type: string | null): string => {
+    const option = caseTypeOptions.find(opt => opt.value === type);
+    return option?.icon || 'minus-circle-outline';
+  };
+
   const handleOpenWorkflowStatusModal = () => {
     setEditingRepairStatus(repairStatus);
     setEditingCaseStatus(caseStatus);
+    setEditingRepairStatusId(repairStatusId);
+    setEditingCaseStatusId(caseStatusId);
     setShowWorkflowStatusModal(true);
   };
 
@@ -281,10 +405,12 @@ export default function CaseDetailScreen() {
     try {
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
 
-      // The status field stores the case status directly
+      // Send both IDs and legacy string values for backwards compatibility
       const updateData = {
         repair_status: editingRepairStatus,
         status: editingCaseStatus,
+        repair_status_id: editingRepairStatusId,
+        status_id: editingCaseStatusId,
       };
 
       console.log('[Case Detail] Saving workflow statuses:', updateData, 'cpanelId:', cpanelId);
@@ -305,10 +431,14 @@ export default function CaseDetailScreen() {
       // Update local state
       setRepairStatus(editingRepairStatus);
       setCaseStatus(editingCaseStatus);
+      setRepairStatusId(editingRepairStatusId);
+      setCaseStatusId(editingCaseStatusId);
       setCaseData((prev: any) => ({
         ...prev,
         repair_status: editingRepairStatus,
         status: editingCaseStatus,
+        repair_status_id: editingRepairStatusId,
+        status_id: editingCaseStatusId,
       }));
 
       setShowWorkflowStatusModal(false);
@@ -317,6 +447,398 @@ export default function CaseDetailScreen() {
       console.error('Error saving workflow statuses:', error);
       Alert.alert('❌ შეცდომა', 'სტატუსის განახლება ვერ მოხერხდა');
     }
+  };
+
+  const handleSaveCaseType = async (newCaseType: string | null) => {
+    try {
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      const updateData = {
+        caseType: newCaseType,
+      };
+
+      console.log('[Case Detail] Saving case type:', updateData, 'cpanelId:', cpanelId);
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel case type update result:', cpanelResult);
+      }
+
+      // Update Firebase
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
+
+      // Update local state
+      setCaseType(newCaseType);
+      setCaseData((prev: any) => ({
+        ...prev,
+        caseType: newCaseType,
+      }));
+
+      setShowCaseTypeModal(false);
+      Alert.alert('✅ წარმატება', 'საქმის ტიპი განახლდა');
+    } catch (error) {
+      console.error('Error saving case type:', error);
+      Alert.alert('❌ შეცდომა', 'საქმის ტიპის განახლება ვერ მოხერხდა');
+    }
+  };
+
+  const loadMechanics = async () => {
+    try {
+      setLoadingMechanics(true);
+      const result = await fetchMechanicsFromCPanel();
+      
+      if (result.success && result.mechanics) {
+        const options: Array<{value: string | null; label: string}> = [
+          { value: null, label: 'არ არის მინიჭებული' }
+        ];
+        
+        result.mechanics.forEach((mechanic: {id: number; name: string}) => {
+          options.push({ value: mechanic.name, label: mechanic.name });
+        });
+        
+        setMechanicOptions(options);
+        console.log('[Case Detail] Loaded mechanics:', options.length - 1);
+      }
+    } catch (error) {
+      console.error('Error loading mechanics:', error);
+    } finally {
+      setLoadingMechanics(false);
+    }
+  };
+
+  const handleOpenMechanicModal = () => {
+    setEditingMechanic(assignedMechanic || '');
+    setShowMechanicModal(true);
+    loadMechanics(); // Load mechanics when modal opens
+  };
+
+  const handleOpenNachrebiQtyModal = () => {
+    setEditingNachrebiQty(nachrebiQty || '');
+    setShowNachrebiQtyModal(true);
+  };
+
+  // Load statuses from cPanel database
+  const loadStatuses = async () => {
+    try {
+      setLoadingStatuses(true);
+      const statuses = await statusService.getStatuses();
+      setCaseStatuses(statuses.case_status);
+      setRepairStatuses(statuses.repair_status);
+      console.log('[Case Detail] Loaded statuses:', {
+        caseStatuses: statuses.case_status.length,
+        repairStatuses: statuses.repair_status.length
+      });
+    } catch (error) {
+      console.error('[Case Detail] Error loading statuses:', error);
+      // Continue without statuses - use legacy string-based system
+    } finally {
+      setLoadingStatuses(false);
+    }
+  };
+
+  // Get status object by ID
+  const getStatusById = (id: number | null, type: 'case_status' | 'repair_status'): Status | null => {
+    if (!id) return null;
+    const statusList = type === 'case_status' ? caseStatuses : repairStatuses;
+    return statusList.find(s => s.id === id) || null;
+  };
+
+  // Get status display info (supports both ID-based and legacy string-based)
+  const getStatusDisplay = (statusId: number | null, legacyStatus: string | null, type: 'case_status' | 'repair_status') => {
+    // Try ID-based first
+    if (statusId) {
+      const status = getStatusById(statusId, type);
+      if (status) {
+        return {
+          name: status.name,
+          color: status.color,
+          bgColor: status.bgColor,
+          icon: status.icon
+        };
+      }
+    }
+    
+    // Fallback to legacy string-based
+    if (legacyStatus) {
+      // Use the old hardcoded colors
+      const color = type === 'case_status' ? getCaseStatusColor(legacyStatus) : getWorkflowStatusColor(legacyStatus);
+      return {
+        name: legacyStatus,
+        color: color,
+        bgColor: color + '15',
+        icon: type === 'case_status' ? 'file-document' : 'wrench'
+      };
+    }
+    
+    return {
+      name: 'არ არის',
+      color: '#94A3B8',
+      bgColor: '#94A3B815',
+      icon: 'minus-circle-outline'
+    };
+  };
+
+  const handleSaveMechanic = async (newMechanic: string | null) => {
+    try {
+      setSavingMechanic(true);
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      const updateData = {
+        assignedMechanic: newMechanic,
+        assigned_mechanic: newMechanic, // For cPanel database column name
+      };
+
+      console.log('[Case Detail] Saving assigned mechanic:', updateData, 'cpanelId:', cpanelId);
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel mechanic update result:', cpanelResult);
+      }
+
+      // Update Firebase
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, { assignedMechanic: newMechanic }, cpanelId || undefined);
+      }
+
+      // Update local state
+      setAssignedMechanic(newMechanic);
+      setCaseData((prev: any) => ({
+        ...prev,
+        assignedMechanic: newMechanic,
+      }));
+
+      setShowMechanicModal(false);
+      Alert.alert('✅ წარმატება', 'მექანიკოსი მინიჭებულია');
+    } catch (error) {
+      console.error('Error saving mechanic:', error);
+      Alert.alert('❌ შეცდომა', 'მექანიკოსის მინიჭება ვერ მოხერხდა');
+    } finally {
+      setSavingMechanic(false);
+    }
+  };
+
+  const handleSaveNachrebiQty = async () => {
+    try {
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      const updateData = {
+        nachrebi_qty: editingNachrebiQty || null
+      };
+
+      console.log('[Case Detail] Saving nachrebi_qty:', updateData, 'cpanelId:', cpanelId);
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel nachrebi_qty update result:', cpanelResult);
+      }
+
+      // Update Firebase
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, { nachrebi_qty: editingNachrebiQty || null }, cpanelId || undefined);
+      }
+
+      // Update local state
+      setNachrebiQty(editingNachrebiQty);
+      setCaseData((prev: any) => ({
+        ...prev,
+        nachrebi_qty: editingNachrebiQty || null,
+      }));
+
+      setShowNachrebiQtyModal(false);
+      Alert.alert('✅ წარმატება', 'ნაჭრების რაოდენობა განახლდა');
+    } catch (error) {
+      console.error('Error saving nachrebi_qty:', error);
+      Alert.alert('❌ შეცდომა', 'ნაჭრების რაოდენობის განახლება ვერ მოხერხდა');
+    }
+  };
+
+  // SMS Functions
+  const SMS_STORAGE_KEY = 'sentSmsIds';
+  
+  // Load SMS recipients from AsyncStorage
+  const loadSmsRecipients = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(SMS_RECIPIENTS_STORAGE_KEY);
+      if (stored) {
+        const savedRecipients: SMSRecipient[] = JSON.parse(stored);
+        // Merge with defaults to ensure all recipients exist
+        const mergedRecipients = DEFAULT_SMS_RECIPIENTS.map(defaultRecipient => {
+          const saved = savedRecipients.find(s => s.id === defaultRecipient.id);
+          if (saved) {
+            return { ...defaultRecipient, phone: saved.phone, enabled: saved.enabled };
+          }
+          return defaultRecipient;
+        });
+        setSmsRecipients(mergedRecipients);
+      }
+    } catch (error) {
+      console.error('Error loading SMS recipients:', error);
+    }
+  };
+
+  // Save SMS recipients to AsyncStorage
+  const saveSmsRecipients = async (recipients: SMSRecipient[]) => {
+    try {
+      await AsyncStorage.setItem(SMS_RECIPIENTS_STORAGE_KEY, JSON.stringify(recipients));
+      setSmsRecipients(recipients);
+    } catch (error) {
+      console.error('Error saving SMS recipients:', error);
+    }
+  };
+
+  // Toggle recipient enabled status
+  const toggleRecipient = (recipientId: string) => {
+    const updated = smsRecipients.map(r => 
+      r.id === recipientId ? { ...r, enabled: !r.enabled } : r
+    );
+    saveSmsRecipients(updated);
+  };
+
+  // Start editing phone number
+  const startEditingPhone = (recipient: SMSRecipient) => {
+    setEditingRecipient(recipient.id);
+    setEditingPhone(recipient.phone);
+  };
+
+  // Save edited phone number
+  const saveEditedPhone = () => {
+    if (editingRecipient && editingPhone.trim()) {
+      const updated = smsRecipients.map(r => 
+        r.id === editingRecipient ? { ...r, phone: editingPhone.trim() } : r
+      );
+      saveSmsRecipients(updated);
+    }
+    setEditingRecipient(null);
+    setEditingPhone('');
+  };
+
+  // Cancel editing
+  const cancelEditingPhone = () => {
+    setEditingRecipient(null);
+    setEditingPhone('');
+  };
+
+  // Get enabled recipients
+  const getEnabledRecipients = () => {
+    return smsRecipients.filter(r => r.enabled);
+  };
+  
+  const loadSmsSentStatus = async () => {
+    try {
+      const caseKey = `${isCpanelOnly ? 'cpanel' : 'firebase'}-${id}`;
+      const stored = await AsyncStorage.getItem(SMS_STORAGE_KEY);
+      if (stored) {
+        const sentIds = JSON.parse(stored) as string[];
+        setSmsSent(sentIds.includes(caseKey));
+      }
+    } catch (error) {
+      console.error('Error loading SMS status:', error);
+    }
+  };
+
+  const markSmsSent = async () => {
+    try {
+      const caseKey = `${isCpanelOnly ? 'cpanel' : 'firebase'}-${id}`;
+      const stored = await AsyncStorage.getItem(SMS_STORAGE_KEY);
+      const sentIds = stored ? JSON.parse(stored) as string[] : [];
+      if (!sentIds.includes(caseKey)) {
+        sentIds.push(caseKey);
+        await AsyncStorage.setItem(SMS_STORAGE_KEY, JSON.stringify(sentIds));
+      }
+      setSmsSent(true);
+    } catch (error) {
+      console.error('Error saving SMS status:', error);
+    }
+  };
+
+  const handleSendCompletionSMS = async () => {
+    const enabledRecipients = getEnabledRecipients();
+    
+    if (enabledRecipients.length === 0) {
+      Alert.alert(
+        'შეცდომა', 
+        'SMS მიმღებები არ არის არჩეული. გთხოვთ აირჩიოთ მინიმუმ ერთი მიმღები პარამეტრებში.',
+        [
+          { text: 'გაუქმება', style: 'cancel' },
+          { text: 'პარამეტრები', onPress: () => setSmsSettingsVisible(true) }
+        ]
+      );
+      return;
+    }
+    
+    const plate = caseData?.plate || 'N/A';
+    const totalPrice = caseData?.totalPrice || 0;
+    const caseTypeLabel = caseType || 'არ არის მითითებული';
+    const mechanicName = assignedMechanic;
+    
+    // Build recipient list for display
+    const recipientNames = enabledRecipients.map(r => `${r.name} (${r.phone})`).join(', ');
+    
+    // Build alert message
+    let alertMessage = `${smsSent ? '⚠️ SMS უკვე გაგზავნილია!\n\n' : ''}გსურთ დასრულების შეტყობინების გაგზავნა?\n\nმიმღებები: ${recipientNames}\n\nავტომობილი: ${plate}\nტიპი: ${caseTypeLabel}`;
+    if (caseType === 'დაზღვევა' && mechanicName) {
+      alertMessage += `\nმექანიკოსი: ${mechanicName}`;
+    }
+    alertMessage += `\nჯამი: ${totalPrice.toFixed(2)} ₾`;
+    
+    Alert.alert(
+      smsSent ? 'SMS ხელახლა გაგზავნა' : 'SMS გაგზავნა',
+      alertMessage,
+      [
+        { text: 'გაუქმება', style: 'cancel' },
+        {
+          text: smsSent ? 'ხელახლა გაგზავნა' : 'გაგზავნა',
+          onPress: async () => {
+            try {
+              setSendingSms(true);
+              
+              // Send SMS to all enabled recipients
+              const results = await Promise.all(
+                enabledRecipients.map(recipient => 
+                  sendCompletionSMS(
+                    recipient.phone,
+                    plate,
+                    totalPrice,
+                    caseType,
+                    mechanicName
+                  )
+                )
+              );
+              
+              const successCount = results.filter(r => r.success).length;
+              const failCount = results.filter(r => !r.success).length;
+              
+              if (successCount > 0) {
+                await markSmsSent();
+                if (failCount > 0) {
+                  Alert.alert('ნაწილობრივი წარმატება', `${successCount} SMS გაგზავნილია, ${failCount} ვერ გაიგზავნა`);
+                } else {
+                  Alert.alert('წარმატება ✓', `SMS წარმატებით გაიგზავნა ${successCount} მიმღებზე!`);
+                }
+              } else {
+                Alert.alert('შეცდომა', 'SMS გაგზავნა ვერ მოხერხდა');
+              }
+            } catch (error) {
+              console.error('SMS error:', error);
+              Alert.alert('შეცდომა', 'SMS გაგზავნა ვერ მოხერხდა');
+            } finally {
+              setSendingSms(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleAddInternalNote = async () => {
@@ -462,6 +984,267 @@ export default function CaseDetailScreen() {
     );
   };
 
+  // ==================== Voice Notes Functions ====================
+  
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      // Clean up any existing recording first
+      if (voiceRecording) {
+        try {
+          await voiceRecording.stopAndUnloadAsync();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        setVoiceRecording(null);
+      }
+
+      console.log('[Voice Notes] Requesting permissions...');
+      const { status } = await Audio.requestPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('შეცდომა', 'მიკროფონის წვდომა საჭიროა ხმოვანი ჩანაწერისთვის');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      console.log('[Voice Notes] Starting recording...');
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      setVoiceRecording(recording);
+      setIsRecordingVoice(true);
+      setRecordingDuration(0);
+
+      // Start duration counter
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+
+    } catch (error) {
+      console.error('[Voice Notes] Failed to start recording:', error);
+      Alert.alert('შეცდომა', 'ჩაწერის დაწყება ვერ მოხერხდა');
+    }
+  };
+
+  const stopVoiceRecording = async () => {
+    try {
+      if (!voiceRecording) return;
+
+      console.log('[Voice Notes] Stopping recording...');
+      
+      // Clear the interval
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
+
+      setIsRecordingVoice(false);
+      await voiceRecording.stopAndUnloadAsync();
+      
+      const uri = voiceRecording.getURI();
+      const duration = recordingDuration;
+      
+      setVoiceRecording(null);
+      setRecordingDuration(0);
+
+      if (uri) {
+        // Upload the voice note
+        await uploadVoiceNote(uri, duration);
+      }
+    } catch (error) {
+      console.error('[Voice Notes] Failed to stop recording:', error);
+      setIsRecordingVoice(false);
+      setVoiceRecording(null);
+      setRecordingDuration(0);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
+      Alert.alert('შეცდომა', 'ჩაწერის შეწყვეტა ვერ მოხერხდა');
+    }
+  };
+
+  const cancelVoiceRecording = async () => {
+    try {
+      if (voiceRecording) {
+        await voiceRecording.stopAndUnloadAsync();
+      }
+    } catch (e) {
+      // Ignore errors when canceling
+    }
+    
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    
+    setIsRecordingVoice(false);
+    setVoiceRecording(null);
+    setRecordingDuration(0);
+  };
+
+  const uploadVoiceNote = async (uri: string, duration: number) => {
+    try {
+      setSavingVoiceNote(true);
+      
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      const storageId = isCpanelOnly ? `cpanel_${id}` : (id as string);
+      
+      // Upload to Firebase Storage
+      const { uploadVoiceNoteToStorage, updateInspection } = require('../../src/services/firebase');
+      const downloadURL = await uploadVoiceNoteToStorage(uri, storageId);
+      
+      const newVoiceNote = {
+        url: downloadURL,
+        timestamp: new Date().toISOString(),
+        authorName: 'მობილური აპი',
+        duration: duration,
+      };
+
+      // Get current voice notes
+      const updatedVoiceNotes = [...voiceNotes, newVoiceNote];
+      
+      const updateData = {
+        voiceNotes: updatedVoiceNotes,
+      };
+
+      // Update CPanel if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        await updateInvoiceToCPanel(cpanelId, updateData);
+      }
+
+      // Update Firebase
+      if (!isCpanelOnly) {
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
+
+      // Update local state
+      setVoiceNotes(updatedVoiceNotes);
+      Alert.alert('✅ წარმატება', 'ხმოვანი ჩანაწერი შეინახა');
+    } catch (error) {
+      console.error('[Voice Notes] Failed to upload:', error);
+      Alert.alert('შეცდომა', 'ხმოვანი ჩანაწერის შენახვა ვერ მოხერხდა');
+    } finally {
+      setSavingVoiceNote(false);
+    }
+  };
+
+  const playVoiceNote = async (url: string) => {
+    try {
+      // Stop any currently playing sound
+      if (soundObject) {
+        await soundObject.unloadAsync();
+        setSoundObject(null);
+        setPlayingVoiceNote(null);
+      }
+
+      console.log('[Voice Notes] Playing:', url);
+      
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: true }
+      );
+
+      setSoundObject(sound);
+      setPlayingVoiceNote(url);
+
+      // Listen for playback status
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setPlayingVoiceNote(null);
+          setSoundObject(null);
+        }
+      });
+    } catch (error) {
+      console.error('[Voice Notes] Failed to play:', error);
+      Alert.alert('შეცდომა', 'ხმოვანი ჩანაწერის დაკვრა ვერ მოხერხდა');
+    }
+  };
+
+  const stopPlayingVoiceNote = async () => {
+    try {
+      if (soundObject) {
+        await soundObject.stopAsync();
+        await soundObject.unloadAsync();
+        setSoundObject(null);
+        setPlayingVoiceNote(null);
+      }
+    } catch (error) {
+      console.error('[Voice Notes] Failed to stop playback:', error);
+    }
+  };
+
+  const deleteVoiceNote = async (noteIndex: number) => {
+    Alert.alert(
+      'ხმოვანი ჩანაწერის წაშლა',
+      'ნამდვილად გსურთ ამ ჩანაწერის წაშლა?',
+      [
+        { text: 'გაუქმება', style: 'cancel' },
+        {
+          text: 'წაშლა',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+              const updatedVoiceNotes = voiceNotes.filter((_, index) => index !== noteIndex);
+
+              const updateData = {
+                voiceNotes: updatedVoiceNotes,
+              };
+
+              // Update CPanel
+              if (cpanelId) {
+                const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+                await updateInvoiceToCPanel(cpanelId, updateData);
+              }
+
+              // Update Firebase
+              if (!isCpanelOnly) {
+                const { updateInspection } = require('../../src/services/firebase');
+                await updateInspection(id as string, updateData, cpanelId || undefined);
+              }
+
+              setVoiceNotes(updatedVoiceNotes);
+              Alert.alert('✅ წარმატება', 'ხმოვანი ჩანაწერი წაიშალა');
+            } catch (error) {
+              console.error('[Voice Notes] Failed to delete:', error);
+              Alert.alert('შეცდომა', 'წაშლა ვერ მოხერხდა');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Cleanup sound on unmount
+  useEffect(() => {
+    return () => {
+      if (soundObject) {
+        soundObject.unloadAsync();
+      }
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    };
+  }, [soundObject]);
+
   // Payment functions
   const loadPayments = async (cpanelId: string) => {
     try {
@@ -606,19 +1389,36 @@ export default function CaseDetailScreen() {
     // Try all possible name fields
     const possibleName = service.serviceNameKa || service.nameKa || service.serviceName || service.name || service.description || '';
     const englishName = service.serviceNameEn || service.serviceName || service.name || 'Unknown Service';
-    
+
     // Use the best available name, checking Georgian names first
     let finalName = possibleName.trim();
     if (!finalName) {
       finalName = getServiceNameGeorgian(englishName) || englishName;
     }
-    
+
+    // Get base price
+    const basePrice = service.price || service.hourly_rate || service.rate || 0;
+
+    // Check if service has individual discount applied (from CPanel)
+    // Use discountedPrice if available, otherwise calculate from discount_percent
+    let finalPrice = basePrice;
+    if (service.discountedPrice !== undefined && service.discountedPrice !== null) {
+      // CPanel provides pre-calculated discounted price
+      finalPrice = service.discountedPrice;
+    } else if (service.discount_percent && service.discount_percent > 0) {
+      // Calculate discount if only percentage is provided
+      finalPrice = basePrice * (1 - service.discount_percent / 100);
+    }
+
     return {
       serviceName: finalName,
       serviceNameKa: finalName,
       serviceNameEn: englishName,
       description: service.description || '',
-      price: service.price || service.hourly_rate || service.rate || 0,
+      price: finalPrice, // Use discounted price if available
+      basePrice: basePrice, // Keep original price for reference
+      discount_percent: service.discount_percent || 0,
+      discountedPrice: service.discountedPrice,
       count: service.count || service.hours || 1,
     };
   };
@@ -634,6 +1434,8 @@ export default function CaseDetailScreen() {
   const getServicesSubtotal = () => {
     return caseData?.services?.reduce((sum: number, s: any) => {
       const normalized = normalizeService(s);
+      // Price from CPanel is already the total price (unit_rate * count)
+      // Do NOT multiply by count again - that causes double multiplication
       return sum + (normalized.price || 0);
     }, 0) || 0;
   };
@@ -672,8 +1474,8 @@ export default function CaseDetailScreen() {
 
   const handleSaveDiscounts = async () => {
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      console.log('[Case Detail] Saving discounts with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
 
       const discountData = {
         services_discount_percent: parseFloat(servicesDiscount) || 0,
@@ -682,7 +1484,18 @@ export default function CaseDetailScreen() {
         totalPrice: getGrandTotal(),
       };
 
-      await updateInspection(id as string, discountData, cpanelId || undefined);
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, discountData);
+        console.log('[Case Detail] CPanel discount update result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, discountData, cpanelId || undefined);
+      }
 
       setCaseData({ ...caseData, ...discountData });
       setShowDiscountModal(false);
@@ -698,8 +1511,8 @@ export default function CaseDetailScreen() {
     setIncludeVAT(newVATValue);
 
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      console.log('[Case Detail] Toggling VAT with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
 
       // Calculate new totals with the new VAT value
       const subtotal = getSubtotalAfterDiscounts();
@@ -714,7 +1527,19 @@ export default function CaseDetailScreen() {
         totalPrice: newTotal,
       };
 
-      await updateInspection(id as string, vatData, cpanelId || undefined);
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, vatData);
+        console.log('[Case Detail] CPanel VAT update result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, vatData, cpanelId || undefined);
+      }
+
       setCaseData({ ...caseData, ...vatData });
     } catch (error) {
       console.error('Error saving VAT:', error);
@@ -771,6 +1596,7 @@ export default function CaseDetailScreen() {
         carMake: cpanelData.carMake || cpanelData.vehicleMake || caseData.carMake,
         carModel: cpanelData.carModel || cpanelData.vehicleModel || caseData.carModel,
         plate: cpanelData.plate || caseData.plate,
+        nachrebi_qty: cpanelData.nachrebi_qty ?? caseData.nachrebi_qty ?? null,
         totalPrice: cpanelData.totalPrice || caseData.totalPrice,
         status: cpanelData.status || caseData.status,
         repair_status: cpanelData.repair_status ?? caseData.repair_status ?? null,
@@ -784,25 +1610,29 @@ export default function CaseDetailScreen() {
         internalNotes: cpanelData.internalNotes || caseData.internalNotes || [],
       };
 
-      const { updateInspection } = require('../../src/services/firebase');
-      await updateInspection(id as string, {
-        customerName: updatedData.customerName,
-        customerPhone: updatedData.customerPhone,
-        carMake: updatedData.carMake,
-        carModel: updatedData.carModel,
-        plate: updatedData.plate,
-        totalPrice: updatedData.totalPrice,
-        status: updatedData.status,
-        repair_status: updatedData.repair_status,
-        services: updatedData.services,
-        parts: updatedData.parts,
-        // Save discount fields to Firebase
-        services_discount_percent: updatedData.services_discount_percent,
-        parts_discount_percent: updatedData.parts_discount_percent,
-        global_discount_percent: updatedData.global_discount_percent,
-        // Save internal notes to Firebase
-        internalNotes: updatedData.internalNotes,
-      });
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, {
+          customerName: updatedData.customerName,
+          customerPhone: updatedData.customerPhone,
+          carMake: updatedData.carMake,
+          carModel: updatedData.carModel,
+          plate: updatedData.plate,
+          nachrebi_qty: updatedData.nachrebi_qty,
+          totalPrice: updatedData.totalPrice,
+          status: updatedData.status,
+          repair_status: updatedData.repair_status,
+          services: updatedData.services,
+          parts: updatedData.parts,
+          // Save discount fields to Firebase
+          services_discount_percent: updatedData.services_discount_percent,
+          parts_discount_percent: updatedData.parts_discount_percent,
+          global_discount_percent: updatedData.global_discount_percent,
+          // Save internal notes to Firebase
+          internalNotes: updatedData.internalNotes,
+        });
+      }
 
       setCaseData(updatedData);
       setEditedServices(updatedData.services || []);
@@ -812,6 +1642,7 @@ export default function CaseDetailScreen() {
       setEditedCarMake(updatedData.carMake || '');
       setEditedCarModel(updatedData.carModel || '');
       setEditedPlate(updatedData.plate || '');
+      setNachrebiQty(String(updatedData.nachrebi_qty || ''));
       // Update discount state
       setServicesDiscount(String(updatedData.services_discount_percent || 0));
       setPartsDiscount(String(updatedData.parts_discount_percent || 0));
@@ -867,6 +1698,20 @@ export default function CaseDetailScreen() {
       const currentNotes = currentData.internalNotes || [];
       const hasInternalNotesChanges = JSON.stringify(cpanelNotes) !== JSON.stringify(currentNotes);
 
+      // Check if cPanel has different parts
+      const cpanelParts = cpanelData.parts || [];
+      const currentParts = currentData.inventoryParts || currentData.parts || [];
+      const hasPartsChanges = JSON.stringify(cpanelParts) !== JSON.stringify(currentParts) ||
+        cpanelParts.length !== currentParts.length;
+
+      // Check if cPanel has different case type
+      const hasCaseTypeChanges = cpanelData.caseType !== (currentData.caseType || null);
+
+      // Check if cPanel has different assigned mechanic
+      const cpanelMechanic = cpanelData.assigned_mechanic || cpanelData.assignedMechanic || null;
+      const currentMechanic = currentData.assignedMechanic || currentData.assigned_mechanic || null;
+      const hasMechanicChanges = cpanelMechanic !== currentMechanic;
+
       // Check if cPanel services have different individual discounts
       const cpanelServices = cpanelData.services || [];
       const currentServices = currentData.services || [];
@@ -884,10 +1729,19 @@ export default function CaseDetailScreen() {
         }
       }
 
-      if (hasGlobalDiscountChanges || hasServiceDiscountChanges || hasVATChanges || hasWorkflowStatusChanges || hasInternalNotesChanges) {
-        console.log('[Case Detail] Silent sync: Changes detected, updating Firebase');
+      if (hasGlobalDiscountChanges || hasServiceDiscountChanges || hasVATChanges || hasWorkflowStatusChanges || hasInternalNotesChanges || hasPartsChanges || hasCaseTypeChanges || hasMechanicChanges) {
+        console.log('[Case Detail] Silent sync: Changes detected');
         if (hasInternalNotesChanges) {
           console.log('[Case Detail] Silent sync: Internal notes changed, syncing from CPanel');
+        }
+        if (hasPartsChanges) {
+          console.log('[Case Detail] Silent sync: Parts changed, syncing from CPanel. CPanel:', cpanelParts.length, 'Local:', currentParts.length);
+        }
+        if (hasCaseTypeChanges) {
+          console.log('[Case Detail] Silent sync: Case type changed, syncing from CPanel:', cpanelData.caseType);
+        }
+        if (hasMechanicChanges) {
+          console.log('[Case Detail] Silent sync: Assigned mechanic changed, syncing from CPanel:', cpanelMechanic);
         }
 
         // Merge individual service discounts from cPanel to current services
@@ -902,23 +1756,48 @@ export default function CaseDetailScreen() {
           return service;
         });
 
-        const { updateInspection } = require('../../src/services/firebase');
-        await updateInspection(id as string, {
-          services: updatedServices,
-          services_discount_percent: cpanelData.services_discount_percent ?? 0,
-          parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
-          global_discount_percent: cpanelData.global_discount_percent ?? 0,
-          includeVAT: cpanelData.includeVAT ?? false,
-          vatAmount: cpanelData.vatAmount ?? 0,
-          vatRate: cpanelData.vatRate ?? 0,
-          subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
-          totalPrice: cpanelData.totalPrice || currentData.totalPrice,
-          // Workflow statuses
-          repair_status: cpanelData.repair_status ?? null,
-          status: cpanelData.status ?? currentData.status,
-          // Internal notes
-          internalNotes: cpanelNotes,
-        });
+        // Transform cPanel parts to match Firebase structure
+        const transformedParts = cpanelParts.map((part: any) => ({
+          id: part.id || `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          nameKa: part.name || part.nameKa || '',
+          name: part.name_en || part.name || part.nameKa || '',
+          partNumber: part.part_number || part.partNumber || '',
+          unitPrice: parseFloat(part.unit_price || part.unitPrice) || 0,
+          quantity: parseInt(part.quantity) || 1,
+          totalPrice: parseFloat(part.total_price || part.totalPrice) || 0,
+          notes: part.notes || '',
+        }));
+
+        // Only update Firebase if this is NOT a CPanel-only case
+        // CPanel-only cases have numeric IDs and no Firebase document
+        if (!isCpanelOnly) {
+          console.log('[Case Detail] Silent sync: Updating Firebase document');
+          const { updateInspection } = require('../../src/services/firebase');
+          await updateInspection(id as string, {
+            services: updatedServices,
+            inventoryParts: transformedParts,
+            parts: transformedParts,
+            services_discount_percent: cpanelData.services_discount_percent ?? 0,
+            parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
+            global_discount_percent: cpanelData.global_discount_percent ?? 0,
+            includeVAT: cpanelData.includeVAT ?? false,
+            vatAmount: cpanelData.vatAmount ?? 0,
+            vatRate: cpanelData.vatRate ?? 0,
+            subtotalBeforeVAT: cpanelData.subtotalBeforeVAT ?? 0,
+            totalPrice: cpanelData.totalPrice || currentData.totalPrice,
+            // Workflow statuses
+            repair_status: cpanelData.repair_status ?? null,
+            status: cpanelData.status ?? currentData.status,
+            // Internal notes
+            internalNotes: cpanelNotes,
+            // Case type
+            caseType: cpanelData.caseType ?? null,
+            // Assigned mechanic
+            assignedMechanic: cpanelMechanic,
+          });
+        } else {
+          console.log('[Case Detail] Silent sync: Skipping Firebase update for CPanel-only case');
+        }
 
         // Update local state
         setServicesDiscount(String(cpanelData.services_discount_percent || 0));
@@ -927,13 +1806,20 @@ export default function CaseDetailScreen() {
         setIncludeVAT(cpanelData.includeVAT || false);
         setRepairStatus(cpanelData.repair_status ?? null);
         setCaseStatus(cpanelData.status ?? null);
+        // Sync case type from cPanel
+        setCaseType(cpanelData.caseType ?? null);
+        // Sync assigned mechanic from cPanel
+        setAssignedMechanic(cpanelMechanic);
         // Sync internal notes from cPanel
         if (cpanelData.internalNotes && Array.isArray(cpanelData.internalNotes)) {
           setInternalNotes(cpanelData.internalNotes);
         }
+        // Sync parts from cPanel
+        setCaseParts(transformedParts);
         setCaseData((prev: any) => ({
           ...prev,
           services: updatedServices,
+          inventoryParts: transformedParts,
           services_discount_percent: cpanelData.services_discount_percent ?? 0,
           parts_discount_percent: cpanelData.parts_discount_percent ?? 0,
           global_discount_percent: cpanelData.global_discount_percent ?? 0,
@@ -945,10 +1831,12 @@ export default function CaseDetailScreen() {
           repair_status: cpanelData.repair_status ?? null,
           status: cpanelData.status ?? prev.status,
           internalNotes: cpanelNotes,
+          caseType: cpanelData.caseType ?? null,
+          assignedMechanic: cpanelMechanic,
         }));
         setEditedServices(updatedServices);
 
-        console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses and internal notes)');
+        console.log('[Case Detail] Silent sync: Data updated from cPanel (including workflow statuses, internal notes, case type, and assigned mechanic)');
       } else {
         console.log('[Case Detail] Silent sync: No changes detected');
       }
@@ -968,6 +1856,14 @@ export default function CaseDetailScreen() {
         const cpanelData = await fetchInvoiceFromCPanel(id as string);
 
         if (cpanelData) {
+          console.log('[Case Detail] CPanel data received:', JSON.stringify({
+            assigned_mechanic: cpanelData.assigned_mechanic,
+            assignedMechanic: cpanelData.assignedMechanic,
+            caseType: cpanelData.caseType,
+          }));
+          
+          const mechanicValue = cpanelData.assigned_mechanic || cpanelData.assignedMechanic || null;
+          
           const data = {
             id: cpanelData.cpanelId?.toString() || id,
             customerName: cpanelData.customerName || '',
@@ -975,9 +1871,12 @@ export default function CaseDetailScreen() {
             carMake: cpanelData.carMake || cpanelData.vehicleMake || '',
             carModel: cpanelData.carModel || cpanelData.vehicleModel || '',
             plate: cpanelData.plate || '',
+            nachrebi_qty: cpanelData.nachrebi_qty || null,
             totalPrice: cpanelData.totalPrice || 0,
             repair_status: cpanelData.repair_status || null,
             status: cpanelData.status || 'New',
+            repair_status_id: cpanelData.repair_status_id || cpanelData.repairStatusId || null,
+            status_id: cpanelData.status_id || cpanelData.statusId || null,
             services: cpanelData.services || [],
             parts: cpanelData.parts || [],
             photos: cpanelData.photos || [],
@@ -990,6 +1889,8 @@ export default function CaseDetailScreen() {
             vatAmount: cpanelData.vatAmount || 0,
             vatRate: cpanelData.vatRate || 0,
             subtotalBeforeVAT: cpanelData.subtotalBeforeVAT || 0,
+            caseType: cpanelData.caseType || null,
+            assignedMechanic: mechanicValue,
             isCpanelOnly: true,
           };
 
@@ -1001,15 +1902,24 @@ export default function CaseDetailScreen() {
           setEditedCarMake(data.carMake || '');
           setEditedCarModel(data.carModel || '');
           setEditedPlate(data.plate || '');
+          setNachrebiQty(String(data.nachrebi_qty || ''));
           setServicesDiscount(String(data.services_discount_percent || 0));
           setPartsDiscount(String(data.parts_discount_percent || 0));
           setGlobalDiscount(String(data.global_discount_percent || 0));
           setIncludeVAT(data.includeVAT || false);
           setRepairStatus(data.repair_status);
           setCaseStatus(data.status || null);
+          setRepairStatusId(data.repair_status_id);
+          setCaseStatusId(data.status_id);
+          setCaseType(cpanelData.caseType || null);
           setCpanelInvoiceId(id as string);
+          // Load assigned mechanic
+          console.log('[Case Detail] Setting assigned mechanic to:', mechanicValue);
+          setAssignedMechanic(mechanicValue);
           // Load internal notes
           setInternalNotes(cpanelData.internalNotes || []);
+          // Load voice notes
+          setVoiceNotes(cpanelData.voiceNotes || []);
           // Load payments
           loadPayments(id as string);
         } else {
@@ -1039,6 +1949,7 @@ export default function CaseDetailScreen() {
         setEditedCarMakeId(data.carMakeId || '');
         setEditedCarModelId(data.carModelId || '');
         setEditedPlate(data.plate || '');
+        setNachrebiQty(String(data.nachrebi_qty || ''));
         // Load discounts
         setServicesDiscount(String(data.services_discount_percent || 0));
         setPartsDiscount(String(data.parts_discount_percent || 0));
@@ -1048,8 +1959,19 @@ export default function CaseDetailScreen() {
         // Load workflow statuses
         setRepairStatus(data.repair_status || null);
         setCaseStatus(data.status || null);
+        setRepairStatusId(data.repair_status_id || data.repairStatusId || null);
+        setCaseStatusId(data.status_id || data.statusId || null);
+        // Load case type
+        setCaseType(data.caseType || null);
+        // Load assigned mechanic
+        setAssignedMechanic(data.assignedMechanic || data.assigned_mechanic || null);
         // Load internal notes
         setInternalNotes(data.internalNotes || []);
+        // Load voice notes
+        setVoiceNotes(data.voiceNotes || []);
+        // Load SMS sent status and recipients
+        loadSmsSentStatus();
+        loadSmsRecipients();
         if (data.cpanelInvoiceId) {
           setCpanelInvoiceId(data.cpanelInvoiceId);
           console.log('[Case Detail] cPanel invoice ID:', data.cpanelInvoiceId);
@@ -1135,10 +2057,22 @@ export default function CaseDetailScreen() {
 
   const handleUpdateStatus = async (newStatus: string) => {
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-      console.log('[Case Detail] Updating status with cPanel ID:', cpanelId);
-      await updateInspection(id as string, { status: newStatus }, cpanelId || undefined);
+      console.log('[Case Detail] Updating status with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, { status: newStatus });
+        console.log('[Case Detail] CPanel status update result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, { status: newStatus }, cpanelId || undefined);
+      }
+
       setCaseData({ ...caseData, status: newStatus });
       Alert.alert('✅ Success', `Status updated to ${newStatus}`);
     } catch (error) {
@@ -1156,15 +2090,27 @@ export default function CaseDetailScreen() {
 
   const handleSaveChanges = async () => {
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const newTotal = editedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-      console.log('[Case Detail] Saving with cPanel ID:', cpanelId);
+      console.log('[Case Detail] Saving with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
 
-      await updateInspection(id as string, {
+      const updateData = {
         services: editedServices,
         totalPrice: newTotal
-      }, cpanelId || undefined);
+      };
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel changes update result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
 
       setCaseData({ ...caseData, services: editedServices, totalPrice: newTotal });
       setEditMode(false);
@@ -1185,7 +2131,7 @@ export default function CaseDetailScreen() {
   const handleServiceCountChange = (index: number, newCount: string) => {
     const updated = [...editedServices];
     const oldCount = normalizeService(updated[index]).count || 1;
-    const newCountNum = parseInt(newCount) || 1;
+    const newCountNum = parseFloat(newCount) || 1; // Changed from parseInt to parseFloat to support decimals
 
     // Calculate price per unit
     const currentPrice = updated[index].price || 0;
@@ -1230,28 +2176,32 @@ export default function CaseDetailScreen() {
     setEditingServiceIndex(index);
     setEditServiceName(normalized.serviceName);
     setEditServiceDescription(normalized.description || '');
-    setEditServicePrice(normalized.price.toString());
+    // Use basePrice (original price before discount) instead of price (after discount)
+    const basePrice = normalized.basePrice || normalized.price;
+    // If unitPrice was stored, use it; otherwise calculate from total / count
+    const unitPrice = service.unitPrice || (basePrice / (normalized.count || 1));
+    setEditServicePrice(unitPrice.toString()); // Store UNIT price, not total
     setEditServiceCount(normalized.count.toString());
     setEditServiceDiscount((service.discount_percent || 0).toString());
+    // Store the base unit price for reference
+    setEditServiceBaseUnitPrice(unitPrice);
     setShowEditServiceModal(true);
   };
 
   const handleEditServiceCountChange = (newCount: string) => {
-    const oldCount = parseInt(editServiceCount) || 1;
-    const newCountNum = parseInt(newCount) || 1;
-
-    // Calculate price per unit based on current total price
-    const currentTotalPrice = parseFloat(editServicePrice) || 0;
-    const pricePerUnit = currentTotalPrice / oldCount;
-
-    // Adjust total price based on new quantity
-    const newTotalPrice = pricePerUnit * newCountNum;
-    const roundedPrice = Math.round(newTotalPrice * 100) / 100;
-
+    // Only update the count, do NOT change the unit price
+    // The total will be calculated in the preview and when saving
     setEditServiceCount(newCount);
-    setEditServicePrice(roundedPrice.toString());
 
-    console.log(`[Edit Modal] Quantity changed: ${oldCount} → ${newCountNum}, Price adjusted: ${currentTotalPrice} → ${roundedPrice.toFixed(2)}`);
+    console.log(`[Edit Modal] Quantity changed to ${newCount}, Unit price stays at ${editServicePrice}`);
+  };
+
+  const handleEditServicePriceChange = (newPrice: string) => {
+    // This is the unit price - store it directly
+    setEditServicePrice(newPrice);
+    setEditServiceBaseUnitPrice(parseFloat(newPrice) || 0);
+
+    console.log(`[Edit Modal] Unit price changed to ${newPrice}`);
   };
 
   const handleSaveEditedService = async () => {
@@ -1263,11 +2213,14 @@ export default function CaseDetailScreen() {
     if (editingServiceIndex === null) return;
 
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      console.log('[Case Detail] Saving edited service with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
 
       const serviceDiscountPercent = parseFloat(editServiceDiscount) || 0;
-      const serviceBasePrice = parseFloat(editServicePrice) || 0;
+      const unitPrice = parseFloat(editServicePrice) || 0;
+      const serviceCount = parseFloat(editServiceCount) || 1;
+      // Calculate total price: unit price × count
+      const serviceBasePrice = unitPrice * serviceCount;
       const serviceDiscountedPrice = serviceBasePrice * (1 - serviceDiscountPercent / 100);
 
       // Get the Georgian name - editServiceName may already be Georgian
@@ -1281,20 +2234,21 @@ export default function CaseDetailScreen() {
         name: georgianName, // For PHP compatibility
         nameKa: georgianName, // Backup field
         description: editServiceDescription,
-        price: serviceBasePrice,
+        price: serviceBasePrice, // Total price (unit × count)
+        unitPrice: unitPrice, // Store unit price for future edits
         discountedPrice: serviceDiscountedPrice,
         discount_percent: serviceDiscountPercent,
-        count: parseInt(editServiceCount) || 1,
+        count: serviceCount,
       };
       
       console.log('[Case Detail] Saving service - FULL SERVICE OBJECT:', JSON.stringify(updatedServices[editingServiceIndex], null, 2));
       console.log('[Case Detail] ALL SERVICES TO SAVE:', JSON.stringify(updatedServices, null, 2));
 
       // Calculate new total with individual service discounts and global discounts
+      // Note: normalizeService() already applies individual discounts, so we just use the price
       const servicesSubtotal = updatedServices.reduce((sum, s) => {
         const sPrice = normalizeService(s).price || s.price || 0;
-        const sDiscount = s.discount_percent || 0;
-        return sum + (sPrice * (1 - sDiscount / 100));
+        return sum + sPrice;
       }, 0);
       const partsSubtotal = caseParts?.reduce((sum: number, p: any) => {
         const pPrice = p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0;
@@ -1309,10 +2263,23 @@ export default function CaseDetailScreen() {
       const globalDiscountAmount = subtotalAfterItemDiscounts * ((parseFloat(globalDiscount) || 0) / 100);
       const newTotal = Math.max(0, subtotalAfterItemDiscounts - globalDiscountAmount);
 
-      await updateInspection(id as string, {
+      const updateData = {
         services: updatedServices,
         totalPrice: newTotal,
-      }, cpanelId || undefined);
+      };
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel edited service update result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
 
       setCaseData({ 
         ...caseData, 
@@ -1392,11 +2359,10 @@ export default function CaseDetailScreen() {
     }
 
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-      console.log('[Case Detail] Saving customer info with cPanel ID:', cpanelId);
+      console.log('[Case Detail] Saving customer info with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
 
-      await updateInspection(id as string, {
+      const updateData = {
         customerName: editedCustomerName,
         customerPhone: editedCustomerPhone,
         carMake: editedCarMake,
@@ -1404,7 +2370,20 @@ export default function CaseDetailScreen() {
         carMakeId: editedCarMakeId,
         carModelId: editedCarModelId,
         plate: editedPlate
-      }, cpanelId || undefined);
+      };
+
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, updateData);
+        console.log('[Case Detail] CPanel customer update result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
 
       setCaseData({
         ...caseData,
@@ -1431,9 +2410,8 @@ export default function CaseDetailScreen() {
     }
 
     try {
-      const { updateInspection } = require('../../src/services/firebase');
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-      console.log('[Case Detail] Adding service with cPanel ID:', cpanelId);
+      console.log('[Case Detail] Adding service with cPanel ID:', cpanelId, 'isCpanelOnly:', isCpanelOnly);
 
       // Use Georgian name as primary, English as backup
       const georgianName = selectedService?.nameKa || getServiceNameGeorgian(newServiceName) || newServiceName;
@@ -1445,7 +2423,7 @@ export default function CaseDetailScreen() {
         nameKa: georgianName, // Backup field
         serviceNameEn: selectedService?.nameEn || newServiceName, // Store English as backup
         price: parseFloat(newServicePrice) || 0,
-        count: parseInt(newServiceCount) || 1,
+        count: parseFloat(newServiceCount) || 1, // Changed from parseInt to parseFloat to support decimals
         discount_percent: 0, // Default no discount
       };
       
@@ -1506,10 +2484,24 @@ export default function CaseDetailScreen() {
 
       const newTotal = updatedServices.reduce((sum, s) => sum + (normalizeService(s).price || s.price || 0), 0);
 
-      await updateInspection(id as string, {
-        services: updatedServices,
-        totalPrice: newTotal,
-      }, cpanelId || undefined);
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        const cpanelResult = await updateInvoiceToCPanel(cpanelId, {
+          services: updatedServices,
+          totalPrice: newTotal,
+        });
+        console.log('[Case Detail] CPanel service add result:', cpanelResult);
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, {
+          services: updatedServices,
+          totalPrice: newTotal,
+        }, cpanelId || undefined);
+      }
 
       setCaseData({ ...caseData, services: updatedServices, totalPrice: newTotal });
       setEditedServices(updatedServices);
@@ -1523,6 +2515,139 @@ export default function CaseDetailScreen() {
       console.error('Error adding service:', error);
       Alert.alert('❌ Error', 'Failed to add service');
     }
+  };
+
+  const handleAddPart = async () => {
+    if (!newPartNameInput.trim() || !newPartPrice.trim()) {
+      Alert.alert('⚠️ შეცდომა', 'ნაწილის სახელი და ფასი აუცილებელია');
+      return;
+    }
+
+    try {
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+      console.log('[Case Detail] Adding part with cPanel ID:', cpanelId);
+
+      const unitPrice = parseFloat(newPartPrice) || 0;
+      const quantity = parseFloat(newPartQuantity) || 1; // Changed from parseInt to parseFloat to support decimals
+
+      const newPart = {
+        id: `part_${Date.now()}`,
+        nameKa: newPartNameInput.trim(),
+        name: newPartNameInput.trim(),
+        partNumber: newPartNumberInput.trim() || '',
+        unitPrice: unitPrice,
+        quantity: quantity,
+        totalPrice: unitPrice * quantity,
+        notes: newPartNotes.trim() || '',
+      };
+
+      console.log('[Case Detail] New part object:', newPart);
+
+      // Add to existing parts
+      const currentParts = caseParts || [];
+      const updatedParts = [...currentParts, newPart];
+
+      // Calculate new total including parts
+      const servicesTotal = (caseData.services || []).reduce((sum: number, s: any) => {
+        const normalized = normalizeService(s);
+        return sum + (normalized.price || s.price || 0);
+      }, 0);
+      const partsTotal = updatedParts.reduce((sum: number, p: any) =>
+        sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0);
+      const newTotal = servicesTotal + partsTotal;
+
+      // Update Firebase (only if not cPanel-only)
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        // Send both inventoryParts (for Firebase) and parts (for cPanel sync)
+        await updateInspection(id as string, {
+          inventoryParts: updatedParts,
+          parts: updatedParts, // cPanel expects 'parts' field
+          totalPrice: newTotal,
+        }, cpanelId || undefined);
+      } else if (cpanelId) {
+        // For cPanel-only cases, update cPanel directly
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        await updateInvoiceToCPanel(cpanelId, {
+          parts: updatedParts,
+          totalPrice: newTotal,
+        });
+      }
+
+      // Update local state
+      setCaseParts(updatedParts);
+      setCaseData({ ...caseData, inventoryParts: updatedParts, totalPrice: newTotal });
+
+      // Reset form and close modal
+      setShowAddPartModal(false);
+      setNewPartNameInput('');
+      setNewPartNumberInput('');
+      setNewPartPrice('');
+      setNewPartQuantity('1');
+      setNewPartNotes('');
+
+      Alert.alert('✅ წარმატება', 'ნაწილი დაემატა');
+    } catch (error) {
+      console.error('Error adding part:', error);
+      Alert.alert('❌ შეცდომა', 'ნაწილის დამატება ვერ მოხერხდა');
+    }
+  };
+
+  const handleDeletePart = async (partIndex: number) => {
+    Alert.alert(
+      '🗑️ ნაწილის წაშლა',
+      'დარწმუნებული ხართ რომ გსურთ ამ ნაწილის წაშლა?',
+      [
+        { text: 'გაუქმება', style: 'cancel' },
+        {
+          text: 'წაშლა',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+              
+              // Remove part from array
+              const updatedParts = caseParts.filter((_, index) => index !== partIndex);
+              
+              // Calculate new total
+              const servicesTotal = (caseData.services || []).reduce((sum: number, s: any) => {
+                const normalized = normalizeService(s);
+                return sum + (normalized.price || s.price || 0);
+              }, 0);
+              const partsTotal = updatedParts.reduce((sum: number, p: any) =>
+                sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0);
+              const newTotal = servicesTotal + partsTotal;
+
+              // Update Firebase (only if not cPanel-only)
+              if (!isCpanelOnly) {
+                const { updateInspection } = require('../../src/services/firebase');
+                await updateInspection(id as string, {
+                  inventoryParts: updatedParts,
+                  parts: updatedParts,
+                  totalPrice: newTotal,
+                }, cpanelId || undefined);
+              } else if (cpanelId) {
+                // For cPanel-only cases, update cPanel directly
+                const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+                await updateInvoiceToCPanel(cpanelId, {
+                  parts: updatedParts,
+                  totalPrice: newTotal,
+                });
+              }
+
+              // Update local state
+              setCaseParts(updatedParts);
+              setCaseData({ ...caseData, inventoryParts: updatedParts, totalPrice: newTotal });
+
+              Alert.alert('✅ წარმატება', 'ნაწილი წაიშალა');
+            } catch (error) {
+              console.error('Error deleting part:', error);
+              Alert.alert('❌ შეცდომა', 'ნაწილის წაშლა ვერ მოხერხდა');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleAddPhotos = async () => {
@@ -1551,17 +2676,22 @@ export default function CaseDetailScreen() {
         setIsUploadingPhotos(true);
         const { uploadMultipleImages, updateInspection } = require('../../src/services/firebase');
 
+        // Use cpanel ID for storage path to keep photos organized
+        const storageId = isCpanelOnly ? `cpanel_${id}` : (id as string);
+
         // 3. Upload the photo to Firebase Storage
         const newImages = result.assets.map(asset => ({ uri: asset.uri, label: 'Camera Photo' }));
-        const uploadedPhotos = await uploadMultipleImages(newImages, id as string);
+        const uploadedPhotos = await uploadMultipleImages(newImages, storageId);
 
         // 4. Combine with existing photos
         const existingPhotos = caseData.photos || [];
         const updatedPhotos = [...existingPhotos, ...uploadedPhotos];
 
-        // 5. Update inspection document in Firestore
-        const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-        await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+        // 5. Update inspection document in Firestore (only if not cPanel-only)
+        if (!isCpanelOnly) {
+          const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+          await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+        }
 
         // 6. Update local state
         setCaseData({ ...caseData, photos: updatedPhotos });
@@ -1598,17 +2728,22 @@ export default function CaseDetailScreen() {
         setIsUploadingPhotos(true);
         const { uploadMultipleImages, updateInspection } = require('../../src/services/firebase');
 
+        // Use cpanel ID for storage path to keep photos organized
+        const storageId = isCpanelOnly ? `cpanel_${id}` : (id as string);
+
         // 3. Upload new images to Firebase Storage
         const newImages = result.assets.map(asset => ({ uri: asset.uri, label: 'Gallery Photo' }));
-        const uploadedPhotos = await uploadMultipleImages(newImages, id as string);
+        const uploadedPhotos = await uploadMultipleImages(newImages, storageId);
 
         // 4. Combine with existing photos
         const existingPhotos = caseData.photos || [];
         const updatedPhotos = [...existingPhotos, ...uploadedPhotos];
 
-        // 5. Update inspection document in Firestore
-        const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-        await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+        // 5. Update inspection document in Firestore (only if not cPanel-only)
+        if (!isCpanelOnly) {
+          const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+          await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+        }
 
         // 6. Update local state
         setCaseData({ ...caseData, photos: updatedPhotos });
@@ -1639,9 +2774,11 @@ export default function CaseDetailScreen() {
               // Remove the photo from the array
               const updatedPhotos = caseData.photos.filter((_: any, index: number) => index !== photoIndex);
 
-              // Update inspection document in Firestore
-              const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-              await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+              // Update inspection document in Firestore (only if not cPanel-only)
+              if (!isCpanelOnly) {
+                const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+                await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
+              }
 
               // Update local state
               setCaseData({ ...caseData, photos: updatedPhotos });
@@ -1690,8 +2827,6 @@ export default function CaseDetailScreen() {
     }
 
     try {
-      const { updateInspection } = require('../../src/services/firebase');
-
       // Build services payload from selected services
       const servicesPayload = selectedServicesForTagging.map((s: any) => ({ name: s.name || s.serviceName || s.title, price: s.price || s.basePrice || 0 }));
 
@@ -1746,7 +2881,18 @@ export default function CaseDetailScreen() {
 
       // Persist
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
-      await updateInspection(id as string, { parts: updatedParts }, cpanelId || undefined);
+      
+      // Update CPanel first if we have cpanel ID
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        await updateInvoiceToCPanel(cpanelId, { parts: updatedParts });
+      }
+
+      // Only update Firebase if this is NOT a CPanel-only case
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, { parts: updatedParts }, cpanelId || undefined);
+      }
 
       // Update local state
       setCaseData({ ...caseData, parts: updatedParts });
@@ -1785,7 +2931,7 @@ export default function CaseDetailScreen() {
   const totalServices = getTotalServiceCount(caseData.services || []);
   const currentTotal = editMode
     ? editedServices.reduce((sum, s) => sum + (s.price || 0), 0)
-    : caseData.totalPrice;
+    : getGrandTotal();
 
   return (
     <View style={styles.container}>
@@ -1804,6 +2950,43 @@ export default function CaseDetailScreen() {
             <Text style={styles.headerSubtitle}>#{id.toString().slice(0, 8).toUpperCase()}</Text>
           </View>
           <View style={styles.headerActions}>
+            <TouchableOpacity
+              onPress={handleRefresh}
+              disabled={isRefreshing}
+              style={[styles.shareButton, isRefreshing && styles.syncButtonDisabled]}
+            >
+              <MaterialCommunityIcons
+                name={isRefreshing ? "loading" : "refresh"}
+                size={20}
+                color={isRefreshing ? COLORS.text.disabled : COLORS.primary}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setSmsSettingsVisible(true)}
+              style={styles.shareButton}
+            >
+              <MaterialCommunityIcons
+                name="message-cog"
+                size={20}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleSendCompletionSMS}
+              disabled={sendingSms}
+              style={[styles.shareButton, sendingSms && styles.syncButtonDisabled]}
+            >
+              <MaterialCommunityIcons
+                name={smsSent ? "message-check" : "message-text"}
+                size={20}
+                color={sendingSms ? COLORS.text.disabled : smsSent ? '#10B981' : COLORS.primary}
+              />
+              {smsSent && (
+                <View style={styles.smsSentBadge}>
+                  <MaterialCommunityIcons name="check" size={10} color="#fff" />
+                </View>
+              )}
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={handleSharePublicLink}
               style={styles.shareButton}
@@ -1897,7 +3080,7 @@ export default function CaseDetailScreen() {
                     </View>
                   </View>
 
-                  {/* User Response */}
+                  {/* Case Status */}
                   <View style={styles.workflowStatusRow}>
                     <View style={styles.workflowStatusLabel}>
                       <MaterialCommunityIcons name="briefcase-check" size={16} color={COLORS.text.secondary} />
@@ -1915,6 +3098,83 @@ export default function CaseDetailScreen() {
                       </Text>
                     </View>
                   </View>
+
+                  {/* Case Type */}
+                  <TouchableOpacity
+                    style={styles.workflowStatusRow}
+                    onPress={() => setShowCaseTypeModal(true)}
+                  >
+                    <View style={styles.workflowStatusLabel}>
+                      <MaterialCommunityIcons name={getCaseTypeIcon(caseType) as any} size={16} color={COLORS.text.secondary} />
+                      <Text style={styles.workflowLabelText}>საქმის ტიპი</Text>
+                    </View>
+                    <View style={[
+                      styles.workflowStatusBadge,
+                      { backgroundColor: getCaseTypeColor(caseType) + '15' }
+                    ]}>
+                      <Text style={[
+                        styles.workflowStatusText,
+                        { color: getCaseTypeColor(caseType) }
+                      ]}>
+                        {getCaseTypeLabel(caseType)}
+                      </Text>
+                      <MaterialCommunityIcons name="chevron-right" size={16} color={getCaseTypeColor(caseType)} />
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Assigned Mechanic */}
+                  <TouchableOpacity
+                    style={styles.workflowStatusRow}
+                    onPress={handleOpenMechanicModal}
+                  >
+                    <View style={[styles.workflowStatusLabel, { flex: 1, marginRight: 8 }]}>
+                      <MaterialCommunityIcons name="account-wrench" size={16} color={COLORS.text.secondary} />
+                      <Text style={styles.workflowLabelText} numberOfLines={1}>მინიჭებული მექანიკოსი</Text>
+                    </View>
+                    <View style={[
+                      styles.workflowStatusBadge,
+                      { backgroundColor: assignedMechanic ? '#6366F1' + '15' : '#94A3B8' + '15', maxWidth: '50%' }
+                    ]}>
+                      <Text
+                        style={[
+                          styles.workflowStatusText,
+                          { color: assignedMechanic ? '#6366F1' : '#94A3B8', flex: 1 }
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {assignedMechanic || 'არ არის მინიჭებული'}
+                      </Text>
+                      <MaterialCommunityIcons name="chevron-right" size={16} color={assignedMechanic ? '#6366F1' : '#94A3B8'} style={{ flexShrink: 0 }} />
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Nachrebi Qty (Pieces Quantity) */}
+                  <TouchableOpacity
+                    style={styles.workflowStatusRow}
+                    onPress={handleOpenNachrebiQtyModal}
+                  >
+                    <View style={[styles.workflowStatusLabel, { flex: 1, marginRight: 8 }]}>
+                      <MaterialCommunityIcons name="package-variant" size={16} color={COLORS.text.secondary} />
+                      <Text style={styles.workflowLabelText} numberOfLines={1}>ნაჭრების რაოდენობა</Text>
+                    </View>
+                    <View style={[
+                      styles.workflowStatusBadge,
+                      { backgroundColor: (nachrebiQty && nachrebiQty !== '' && nachrebiQty !== '0') ? '#10B981' + '15' : '#94A3B8' + '15', maxWidth: '50%' }
+                    ]}>
+                      <Text
+                        style={[
+                          styles.workflowStatusText,
+                          { color: (nachrebiQty && nachrebiQty !== '' && nachrebiQty !== '0') ? '#10B981' : '#94A3B8', flex: 1 }
+                        ]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {(nachrebiQty && nachrebiQty !== '' && nachrebiQty !== '0') ? `${nachrebiQty} ცალი` : 'არ არის მითითებული'}
+                      </Text>
+                      <MaterialCommunityIcons name="chevron-right" size={16} color={(nachrebiQty && nachrebiQty !== '' && nachrebiQty !== '0') ? '#10B981' : '#94A3B8'} style={{ flexShrink: 0 }} />
+                    </View>
+                  </TouchableOpacity>
                 </View>
               </Card.Content>
             </Card>
@@ -2134,6 +3394,111 @@ export default function CaseDetailScreen() {
             </Card.Content>
           </Card>
 
+          {/* Voice Notes Card */}
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: '#8B5CF615' }]}>
+                    <MaterialCommunityIcons name="microphone" size={20} color="#8B5CF6" />
+                  </View>
+                  <Text style={styles.cardTitle}>ხმოვანი ჩანაწერები ({voiceNotes.length})</Text>
+                </View>
+                {!isRecordingVoice && !savingVoiceNote && (
+                  <TouchableOpacity
+                    onPress={startVoiceRecording}
+                    style={styles.editIconButton}
+                  >
+                    <MaterialCommunityIcons name="microphone-plus" size={28} color="#8B5CF6" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Recording UI */}
+              {isRecordingVoice && (
+                <View style={styles.recordingContainer}>
+                  <View style={styles.recordingIndicator}>
+                    <View style={styles.recordingDot} />
+                    <Text style={styles.recordingText}>ჩაწერა... {formatDuration(recordingDuration)}</Text>
+                  </View>
+                  <View style={styles.recordingActions}>
+                    <TouchableOpacity
+                      onPress={cancelVoiceRecording}
+                      style={[styles.recordingButton, styles.cancelRecordingButton]}
+                    >
+                      <MaterialCommunityIcons name="close" size={24} color="#EF4444" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={stopVoiceRecording}
+                      style={[styles.recordingButton, styles.stopRecordingButton]}
+                    >
+                      <MaterialCommunityIcons name="stop" size={24} color="white" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Saving indicator */}
+              {savingVoiceNote && (
+                <View style={styles.savingVoiceNoteContainer}>
+                  <ActivityIndicator size="small" color="#8B5CF6" />
+                  <Text style={styles.savingVoiceNoteText}>ინახება...</Text>
+                </View>
+              )}
+
+              {/* Voice Notes List */}
+              {!isRecordingVoice && !savingVoiceNote && voiceNotes.length === 0 ? (
+                <View style={styles.emptyNotesContainer}>
+                  <MaterialCommunityIcons name="microphone-off" size={40} color={COLORS.text.disabled} />
+                  <Text style={styles.emptyNotesText}>ხმოვანი ჩანაწერები არ არის</Text>
+                  <TouchableOpacity
+                    onPress={startVoiceRecording}
+                    style={[styles.addNoteButton, { borderColor: '#8B5CF6' }]}
+                  >
+                    <MaterialCommunityIcons name="microphone" size={18} color="#8B5CF6" />
+                    <Text style={[styles.addNoteButtonText, { color: '#8B5CF6' }]}>ჩაწერის დაწყება</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : !isRecordingVoice && !savingVoiceNote && (
+                <View style={styles.voiceNotesList}>
+                  {voiceNotes.map((note, index) => (
+                    <View key={index} style={styles.voiceNoteItem}>
+                      <View style={styles.voiceNoteInfo}>
+                        <View style={styles.voiceNoteHeader}>
+                          <MaterialCommunityIcons name="account-voice" size={18} color="#8B5CF6" />
+                          <Text style={styles.voiceNoteAuthor}>{note.authorName}</Text>
+                          {note.duration !== undefined && (
+                            <Text style={styles.voiceNoteDuration}>{formatDuration(note.duration)}</Text>
+                          )}
+                        </View>
+                        <Text style={styles.voiceNoteDate}>{formatNoteDate(note.timestamp)}</Text>
+                      </View>
+                      <View style={styles.voiceNoteActions}>
+                        <TouchableOpacity
+                          onPress={() => playingVoiceNote === note.url ? stopPlayingVoiceNote() : playVoiceNote(note.url)}
+                          style={[styles.voiceNotePlayButton, playingVoiceNote === note.url && styles.voiceNotePlayingButton]}
+                        >
+                          <MaterialCommunityIcons 
+                            name={playingVoiceNote === note.url ? "stop" : "play"} 
+                            size={22} 
+                            color={playingVoiceNote === note.url ? "white" : "#8B5CF6"} 
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => deleteVoiceNote(index)}
+                          style={styles.voiceNoteDeleteButton}
+                        >
+                          <MaterialCommunityIcons name="delete-outline" size={20} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                      {index < voiceNotes.length - 1 && <Divider style={styles.noteDivider} />}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </Card.Content>
+          </Card>
+
           {/* Payments Card */}
           <Card style={styles.modernCard}>
             <Card.Content style={styles.cardContent}>
@@ -2156,7 +3521,7 @@ export default function CaseDetailScreen() {
               <View style={styles.paymentSummary}>
                 <View style={styles.paymentSummaryRow}>
                   <Text style={styles.paymentSummaryLabel}>სულ თანხა:</Text>
-                  <Text style={styles.paymentSummaryValue}>₾{(caseData?.totalPrice || 0).toFixed(2)}</Text>
+                  <Text style={styles.paymentSummaryValue}>₾{getGrandTotal().toFixed(2)}</Text>
                 </View>
                 <View style={styles.paymentSummaryRow}>
                   <Text style={styles.paymentSummaryLabel}>გადახდილი:</Text>
@@ -2166,9 +3531,9 @@ export default function CaseDetailScreen() {
                   <Text style={styles.paymentSummaryLabelBold}>დარჩენილი:</Text>
                   <Text style={[
                     styles.paymentSummaryValueBold,
-                    { color: (caseData?.totalPrice || 0) - totalPaid <= 0 ? '#10B981' : '#EF4444' }
+                    { color: getGrandTotal() - totalPaid <= 0 ? '#10B981' : '#EF4444' }
                   ]}>
-                    ₾{Math.max(0, (caseData?.totalPrice || 0) - totalPaid).toFixed(2)}
+                    ₾{Math.max(0, getGrandTotal() - totalPaid).toFixed(2)}
                   </Text>
                 </View>
               </View>
@@ -2284,21 +3649,21 @@ export default function CaseDetailScreen() {
                               <Text style={styles.controlLabel}>რაოდენობა</Text>
                               <View style={styles.quantityControl}>
                                 <TouchableOpacity
-                                  onPress={() => handleServiceCountChange(index, Math.max(1, normalized.count - 1).toString())}
-                                  style={[styles.quantityButton, normalized.count <= 1 && styles.quantityButtonDisabled]}
-                                  disabled={normalized.count <= 1}
+                                  onPress={() => handleServiceCountChange(index, Math.max(0.1, normalized.count - 0.1).toFixed(1))}
+                                  style={[styles.quantityButton, normalized.count <= 0.1 && styles.quantityButtonDisabled]}
+                                  disabled={normalized.count <= 0.1}
                                 >
                                   <MaterialCommunityIcons
                                     name="minus"
                                     size={18}
-                                    color={normalized.count <= 1 ? COLORS.text.disabled : COLORS.primary}
+                                    color={normalized.count <= 0.1 ? COLORS.text.disabled : COLORS.primary}
                                   />
                                 </TouchableOpacity>
                                 <View style={styles.quantityDisplay}>
-                                  <Text style={styles.quantityText}>{normalized.count}</Text>
+                                  <Text style={styles.quantityText}>{normalized.count % 1 === 0 ? normalized.count : normalized.count.toFixed(1)}</Text>
                                 </View>
                                 <TouchableOpacity
-                                  onPress={() => handleServiceCountChange(index, (normalized.count + 1).toString())}
+                                  onPress={() => handleServiceCountChange(index, (normalized.count + 0.1).toFixed(1))}
                                   style={styles.quantityButton}
                                 >
                                   <MaterialCommunityIcons name="plus" size={18} color={COLORS.primary} />
@@ -2353,10 +3718,10 @@ export default function CaseDetailScreen() {
                             {service.discount_percent > 0 ? (
                               <>
                                 <Text style={[styles.modernServicePrice, { textDecorationLine: 'line-through', color: COLORS.text.secondary, fontSize: 12 }]}>
-                                  {formatCurrencyGEL(normalized.price)}
+                                  {formatCurrencyGEL(normalized.basePrice || normalized.price)}
                                 </Text>
                                 <Text style={[styles.modernServicePrice, { color: COLORS.success }]}>
-                                  {formatCurrencyGEL(normalized.price * (1 - (service.discount_percent || 0) / 100))}
+                                  {formatCurrencyGEL(normalized.price)}
                                 </Text>
                               </>
                             ) : (
@@ -2397,63 +3762,88 @@ export default function CaseDetailScreen() {
           </Card>
 
           {/* Parts Card */}
-          {caseParts && caseParts.length > 0 && (
-            <Card style={styles.modernCard}>
-              <Card.Content style={styles.cardContent}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardHeaderLeft}>
-                    <View style={[styles.iconCircle, { backgroundColor: COLORS.accent + '15' }]}>
-                      <MaterialCommunityIcons name="car-cog" size={20} color={COLORS.accent} />
-                    </View>
-                    <Text style={styles.cardTitle}>ნაწილები ({caseParts.length})</Text>
+          <Card style={styles.modernCard}>
+            <Card.Content style={styles.cardContent}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={[styles.iconCircle, { backgroundColor: COLORS.accent + '15' }]}>
+                    <MaterialCommunityIcons name="car-cog" size={20} color={COLORS.accent} />
                   </View>
+                  <Text style={styles.cardTitle}>ნაწილები {caseParts && caseParts.length > 0 ? `(${caseParts.length})` : ''}</Text>
                 </View>
+                <TouchableOpacity
+                  onPress={() => setShowAddPartModal(true)}
+                  style={styles.addServiceButton}
+                >
+                  <MaterialCommunityIcons name="plus-circle" size={28} color={COLORS.accent} />
+                </TouchableOpacity>
+              </View>
 
-                <View style={styles.servicesList}>
-                  {caseParts.map((part: any, index: number) => (
-                    <View key={part.id || `part-${index}`}>
-                      <View style={styles.modernServiceRow}>
-                        <View style={styles.serviceLeft}>
-                          <View style={[styles.serviceIconSmall, { backgroundColor: COLORS.accent + '15' }]}>
-                            <MaterialCommunityIcons name="cog" size={16} color={COLORS.accent} />
-                          </View>
-                          <View style={styles.serviceTextContainer}>
-                            <View style={styles.serviceNameRow}>
-                              <Text style={styles.modernServiceName}>
-                                {part.nameKa || part.name || 'ნაწილი'}
-                              </Text>
-                              {(part.quantity || 1) > 1 && (
-                                <View style={styles.countBadge}>
-                                  <Text style={styles.countBadgeText}>x{part.quantity || 1}</Text>
-                                </View>
+              {caseParts && caseParts.length > 0 ? (
+                <>
+                  <View style={styles.servicesList}>
+                    {caseParts.map((part: any, index: number) => (
+                      <View key={part.id || `part-${index}`}>
+                        <View style={styles.modernServiceRow}>
+                          <View style={styles.serviceLeft}>
+                            <View style={[styles.serviceIconSmall, { backgroundColor: COLORS.accent + '15' }]}>
+                              <MaterialCommunityIcons name="cog" size={16} color={COLORS.accent} />
+                            </View>
+                            <View style={styles.serviceTextContainer}>
+                              <View style={styles.serviceNameRow}>
+                                <Text style={styles.modernServiceName}>
+                                  {part.nameKa || part.name || 'ნაწილი'}
+                                </Text>
+                                {(part.quantity || 1) > 1 && (
+                                  <View style={styles.countBadge}>
+                                    <Text style={styles.countBadgeText}>x{part.quantity || 1}</Text>
+                                  </View>
+                                )}
+                              </View>
+                              {part.partNumber && (
+                                <Text style={styles.serviceDescription}>#{part.partNumber}</Text>
+                              )}
+                              {part.notes && (
+                                <Text style={styles.serviceDescription}>{part.notes}</Text>
                               )}
                             </View>
-                            {part.partNumber && (
-                              <Text style={styles.serviceDescription}>#{part.partNumber}</Text>
-                            )}
-                            {part.notes && (
-                              <Text style={styles.serviceDescription}>{part.notes}</Text>
-                            )}
+                          </View>
+                          <View style={styles.partPriceDeleteContainer}>
+                            <Text style={styles.modernServicePrice}>{formatCurrencyGEL(part.totalPrice || (part.unitPrice * (part.quantity || 1)))}</Text>
+                            <TouchableOpacity
+                              onPress={() => handleDeletePart(index)}
+                              style={styles.deletePartButton}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                              <MaterialCommunityIcons name="trash-can-outline" size={18} color={COLORS.error} />
+                            </TouchableOpacity>
                           </View>
                         </View>
-                        <Text style={styles.modernServicePrice}>{formatCurrencyGEL(part.totalPrice || (part.unitPrice * (part.quantity || 1)))}</Text>
+                        {index < caseParts.length - 1 && <Divider style={styles.modernDivider} />}
                       </View>
-                      {index < caseParts.length - 1 && <Divider style={styles.modernDivider} />}
-                    </View>
-                  ))}
-                </View>
+                    ))}
+                  </View>
 
-                {/* Parts Total */}
-                <View style={styles.servicesSubtotal}>
-                  <Text style={styles.subtotalLabel}>ნაწილების ჯამი:</Text>
-                  <Text style={styles.subtotalValue}>
-                    {formatCurrencyGEL(caseParts.reduce((sum: number, p: any) => 
-                      sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0))}
-                  </Text>
-                </View>
-              </Card.Content>
-            </Card>
-          )}
+                  {/* Parts Total */}
+                  <View style={styles.servicesSubtotal}>
+                    <Text style={styles.subtotalLabel}>ნაწილების ჯამი:</Text>
+                    <Text style={styles.subtotalValue}>
+                      {formatCurrencyGEL(caseParts.reduce((sum: number, p: any) =>
+                        sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0), 0))}
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.emptyStateButton}
+                  onPress={() => setShowAddPartModal(true)}
+                >
+                  <MaterialCommunityIcons name="plus" size={24} color={COLORS.accent} />
+                  <Text style={styles.emptyStateButtonText}>ნაწილის დამატება</Text>
+                </TouchableOpacity>
+              )}
+            </Card.Content>
+          </Card>
 
           {/* Discounts & Totals Card */}
           <Card style={styles.modernCard}>
@@ -2713,7 +4103,7 @@ export default function CaseDetailScreen() {
               value={newServicePrice}
               onChangeText={setNewServicePrice}
               mode="outlined"
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               style={[styles.modernInput, { flex: 1, marginRight: 12 }]}
               outlineStyle={styles.inputOutline}
               left={<TextInput.Affix text="₾" />}
@@ -2723,7 +4113,7 @@ export default function CaseDetailScreen() {
               value={newServiceCount}
               onChangeText={setNewServiceCount}
               mode="outlined"
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               style={[styles.modernInput, { width: 110 }]}
               outlineStyle={styles.inputOutline}
             />
@@ -2750,6 +4140,108 @@ export default function CaseDetailScreen() {
               style={[styles.modernButton, styles.primaryButton]}
               buttonColor={COLORS.primary}
               disabled={!newServiceName.trim() || !newServicePrice.trim()}
+            >
+              დამატება
+            </Button>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Add Part Modal */}
+      <Portal>
+        <Modal
+          visible={showAddPartModal}
+          onDismiss={() => setShowAddPartModal(false)}
+          contentContainerStyle={styles.modernModal}
+        >
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHeaderLeft}>
+              <View style={[styles.iconCircle, { backgroundColor: COLORS.accent + '15' }]}>
+                <MaterialCommunityIcons name="car-cog" size={20} color={COLORS.accent} />
+              </View>
+              <Text style={styles.modalTitle}>ნაწილის დამატება</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowAddPartModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <TextInput
+            label="ნაწილის სახელი *"
+            value={newPartNameInput}
+            onChangeText={setNewPartNameInput}
+            mode="outlined"
+            style={styles.modernInput}
+            outlineStyle={styles.inputOutline}
+          />
+
+          <TextInput
+            label="ნაწილის ნომერი (არასავალდებულო)"
+            value={newPartNumberInput}
+            onChangeText={setNewPartNumberInput}
+            mode="outlined"
+            style={styles.modernInput}
+            outlineStyle={styles.inputOutline}
+          />
+
+          <View style={styles.priceCountRow}>
+            <TextInput
+              label="ფასი *"
+              value={newPartPrice}
+              onChangeText={setNewPartPrice}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={[styles.modernInput, { flex: 1, marginRight: 12 }]}
+              outlineStyle={styles.inputOutline}
+              left={<TextInput.Affix text="₾" />}
+            />
+            <TextInput
+              label="რაოდენობა"
+              value={newPartQuantity}
+              onChangeText={setNewPartQuantity}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={[styles.modernInput, { width: 110 }]}
+              outlineStyle={styles.inputOutline}
+            />
+          </View>
+
+          <TextInput
+            label="შენიშვნა (არასავალდებულო)"
+            value={newPartNotes}
+            onChangeText={setNewPartNotes}
+            mode="outlined"
+            style={styles.modernInput}
+            outlineStyle={styles.inputOutline}
+            multiline
+            numberOfLines={2}
+          />
+
+          <View style={styles.modernEditActions}>
+            <Button
+              mode="outlined"
+              onPress={() => {
+                setShowAddPartModal(false);
+                setNewPartNameInput('');
+                setNewPartNumberInput('');
+                setNewPartPrice('');
+                setNewPartQuantity('1');
+                setNewPartNotes('');
+              }}
+              style={styles.modernButton}
+              textColor={COLORS.text.secondary}
+            >
+              გაუქმება
+            </Button>
+            <Button
+              mode="contained"
+              onPress={handleAddPart}
+              style={[styles.modernButton, styles.primaryButton]}
+              buttonColor={COLORS.accent}
+              disabled={!newPartNameInput.trim() || !newPartPrice.trim()}
             >
               დამატება
             </Button>
@@ -2821,9 +4313,9 @@ export default function CaseDetailScreen() {
                 <Text style={styles.inputGroupLabel}>ფასი (₾)</Text>
                 <TextInput
                   value={editServicePrice}
-                  onChangeText={setEditServicePrice}
+                  onChangeText={handleEditServicePriceChange}
                   mode="outlined"
-                  keyboardType="numeric"
+                  keyboardType="decimal-pad"
                   placeholder="0"
                   style={styles.enhancedInput}
                   outlineStyle={styles.enhancedInputOutline}
@@ -2835,21 +4327,30 @@ export default function CaseDetailScreen() {
                 <Text style={styles.inputGroupLabel}>რაოდენობა</Text>
                 <View style={styles.modalQuantityControl}>
                   <TouchableOpacity
-                    onPress={() => handleEditServiceCountChange(Math.max(1, parseInt(editServiceCount) - 1).toString())}
-                    style={[styles.modalQuantityButton, parseInt(editServiceCount) <= 1 && styles.quantityButtonDisabled]}
-                    disabled={parseInt(editServiceCount) <= 1}
+                    onPress={() => {
+                      const currentCount = parseFloat(editServiceCount) || 1;
+                      handleEditServiceCountChange(Math.max(0.1, currentCount - 0.1).toFixed(1));
+                    }}
+                    style={[styles.modalQuantityButton, parseFloat(editServiceCount) <= 0.1 && styles.quantityButtonDisabled]}
+                    disabled={parseFloat(editServiceCount) <= 0.1}
                   >
                     <MaterialCommunityIcons
                       name="minus"
                       size={20}
-                      color={parseInt(editServiceCount) <= 1 ? COLORS.text.disabled : COLORS.primary}
+                      color={parseFloat(editServiceCount) <= 0.1 ? COLORS.text.disabled : COLORS.primary}
                     />
                   </TouchableOpacity>
-                  <View style={styles.modalQuantityDisplay}>
-                    <Text style={styles.modalQuantityText}>{editServiceCount}</Text>
-                  </View>
+                  <TextInput
+                    value={editServiceCount}
+                    onChangeText={setEditServiceCount}
+                    keyboardType="decimal-pad"
+                    style={styles.modalQuantityInput}
+                  />
                   <TouchableOpacity
-                    onPress={() => handleEditServiceCountChange((parseInt(editServiceCount) + 1).toString())}
+                    onPress={() => {
+                      const currentCount = parseFloat(editServiceCount) || 1;
+                      handleEditServiceCountChange((currentCount + 0.1).toFixed(1));
+                    }}
                     style={styles.modalQuantityButton}
                   >
                     <MaterialCommunityIcons name="plus" size={20} color={COLORS.primary} />
@@ -2877,23 +4378,31 @@ export default function CaseDetailScreen() {
             {/* Total Preview */}
             {editServicePrice && editServiceCount && (
               <View style={styles.totalPreviewCard}>
+                {/* Show unit price */}
                 <View style={styles.totalPreviewRow}>
-                  <Text style={styles.totalPreviewLabel}>ფასი:</Text>
-                  <Text style={[styles.totalPreviewAmount, parseFloat(editServiceDiscount) > 0 && { textDecorationLine: 'line-through', color: COLORS.text.secondary }]}>
+                  <Text style={styles.totalPreviewLabel}>ერთეულის ფასი:</Text>
+                  <Text style={styles.totalPreviewAmount}>
                     {formatCurrencyGEL(parseFloat(editServicePrice) || 0)}
+                  </Text>
+                </View>
+                {/* Show calculated total (unit × count) */}
+                <View style={styles.totalPreviewRow}>
+                  <Text style={[styles.totalPreviewLabel, { fontWeight: '600' }]}>ჯამი:</Text>
+                  <Text style={[styles.totalPreviewAmount, parseFloat(editServiceDiscount) > 0 && { textDecorationLine: 'line-through', color: COLORS.text.secondary }]}>
+                    {formatCurrencyGEL((parseFloat(editServicePrice) || 0) * (parseFloat(editServiceCount) || 1))}
                   </Text>
                 </View>
                 {parseFloat(editServiceDiscount) > 0 && (
                   <View style={styles.totalPreviewRow}>
                     <Text style={[styles.totalPreviewLabel, { color: COLORS.success }]}>ფასდაკლებით:</Text>
                     <Text style={[styles.totalPreviewAmount, { color: COLORS.success }]}>
-                      {formatCurrencyGEL((parseFloat(editServicePrice) || 0) * (1 - (parseFloat(editServiceDiscount) || 0) / 100))}
+                      {formatCurrencyGEL((parseFloat(editServicePrice) || 0) * (parseFloat(editServiceCount) || 1) * (1 - (parseFloat(editServiceDiscount) || 0) / 100))}
                     </Text>
                   </View>
                 )}
-                {parseInt(editServiceCount) > 1 && (
+                {parseFloat(editServiceCount) > 1 && (
                   <Text style={styles.totalPreviewSubtext}>
-                    {editServiceCount} × {formatCurrencyGEL((parseFloat(editServicePrice) || 0) / (parseInt(editServiceCount) || 1))}
+                    {editServiceCount} × {formatCurrencyGEL(parseFloat(editServicePrice) || 0)}
                   </Text>
                 )}
               </View>
@@ -3352,46 +4861,99 @@ export default function CaseDetailScreen() {
 
               {/* Progress Steps */}
               <View style={styles.workflowStepsContainer}>
-                {repairStatusOptions.map((option, index) => {
-                  const isSelected = editingRepairStatus === option.value;
-                  const currentIndex = repairStatusOptions.findIndex(o => o.value === editingRepairStatus);
-                  const isPast = currentIndex > index && currentIndex !== -1;
-                  const stepColor = option.value === null ? '#94A3B8' : getWorkflowStatusColor(option.value);
+                {loadingStatuses ? (
+                  <View style={{ padding: 20, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#8B5CF6" />
+                    <Text style={{ marginTop: 8, color: COLORS.text.secondary }}>იტვირთება...</Text>
+                  </View>
+                ) : repairStatuses.length > 0 ? (
+                  repairStatuses.map((status, index) => {
+                    const isSelected = editingRepairStatusId === status.id;
+                    const currentIndex = repairStatuses.findIndex(s => s.id === editingRepairStatusId);
+                    const isPast = currentIndex > index && currentIndex !== -1;
+                    const stepColor = status.color || '#8B5CF6';
 
-                  return (
-                    <TouchableOpacity
-                      key={option.value || 'null'}
-                      style={[
-                        styles.workflowStep,
-                        isSelected && { backgroundColor: stepColor + '15', borderColor: stepColor },
-                        isPast && { backgroundColor: stepColor + '08' }
-                      ]}
-                      onPress={() => setEditingRepairStatus(option.value)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[
-                        styles.workflowStepIndicator,
-                        isSelected && { backgroundColor: stepColor },
-                        isPast && { backgroundColor: stepColor, opacity: 0.5 }
-                      ]}>
-                        {isSelected ? (
-                          <MaterialCommunityIcons name="check" size={14} color="#fff" />
-                        ) : isPast ? (
-                          <MaterialCommunityIcons name="check" size={12} color="#fff" />
-                        ) : (
-                          <Text style={styles.workflowStepNumber}>{index}</Text>
-                        )}
-                      </View>
-                      <Text style={[
-                        styles.workflowStepText,
-                        isSelected && { color: stepColor, fontWeight: '600' },
-                        isPast && { color: stepColor }
-                      ]}>
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                    return (
+                      <TouchableOpacity
+                        key={status.id}
+                        style={[
+                          styles.workflowStep,
+                          isSelected && { backgroundColor: stepColor + '15', borderColor: stepColor },
+                          isPast && { backgroundColor: stepColor + '08' }
+                        ]}
+                        onPress={() => {
+                          setEditingRepairStatusId(status.id);
+                          setEditingRepairStatus(status.name);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[
+                          styles.workflowStepIndicator,
+                          isSelected && { backgroundColor: stepColor },
+                          isPast && { backgroundColor: stepColor, opacity: 0.5 }
+                        ]}>
+                          {isSelected ? (
+                            <MaterialCommunityIcons name="check" size={14} color="#fff" />
+                          ) : isPast ? (
+                            <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                          ) : status.icon ? (
+                            <MaterialCommunityIcons name={status.icon as any} size={14} color="#fff" />
+                          ) : (
+                            <Text style={styles.workflowStepNumber}>{index}</Text>
+                          )}
+                        </View>
+                        <Text style={[
+                          styles.workflowStepText,
+                          isSelected && { color: stepColor, fontWeight: '600' },
+                          isPast && { color: stepColor }
+                        ]}>
+                          {status.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  repairStatusOptions.map((option, index) => {
+                    const isSelected = editingRepairStatus === option.value;
+                    const currentIndex = repairStatusOptions.findIndex(o => o.value === editingRepairStatus);
+                    const isPast = currentIndex > index && currentIndex !== -1;
+                    const stepColor = option.value === null ? '#94A3B8' : getWorkflowStatusColor(option.value);
+
+                    return (
+                      <TouchableOpacity
+                        key={option.value || 'null'}
+                        style={[
+                          styles.workflowStep,
+                          isSelected && { backgroundColor: stepColor + '15', borderColor: stepColor },
+                          isPast && { backgroundColor: stepColor + '08' }
+                        ]}
+                        onPress={() => setEditingRepairStatus(option.value)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[
+                          styles.workflowStepIndicator,
+                          isSelected && { backgroundColor: stepColor },
+                          isPast && { backgroundColor: stepColor, opacity: 0.5 }
+                        ]}>
+                          {isSelected ? (
+                            <MaterialCommunityIcons name="check" size={14} color="#fff" />
+                          ) : isPast ? (
+                            <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                          ) : (
+                            <Text style={styles.workflowStepNumber}>{index}</Text>
+                          )}
+                        </View>
+                        <Text style={[
+                          styles.workflowStepText,
+                          isSelected && { color: stepColor, fontWeight: '600' },
+                          isPast && { color: stepColor }
+                        ]}>
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
               </View>
             </View>
 
@@ -3403,44 +4965,93 @@ export default function CaseDetailScreen() {
               </View>
 
               <View style={styles.userResponseGrid}>
-                {caseStatusOptions.map((option) => {
-                  const isSelected = editingCaseStatus === option.value;
-                  const statusColor = option.color;
+                {loadingStatuses ? (
+                  <View style={{ padding: 20, alignItems: 'center', width: '100%' }}>
+                    <ActivityIndicator size="small" color="#10B981" />
+                    <Text style={{ marginTop: 8, color: COLORS.text.secondary }}>იტვირთება...</Text>
+                  </View>
+                ) : caseStatuses.length > 0 ? (
+                  caseStatuses.map((status) => {
+                    const isSelected = editingCaseStatusId === status.id;
+                    const statusColor = status.color || '#10B981';
 
-                  return (
-                    <TouchableOpacity
-                      key={option.value || 'null'}
-                      style={[
-                        styles.userResponseCard,
-                        isSelected && { backgroundColor: statusColor + '15', borderColor: statusColor }
-                      ]}
-                      onPress={() => setEditingCaseStatus(option.value)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[
-                        styles.userResponseIconContainer,
-                        isSelected && { backgroundColor: statusColor + '20' }
-                      ]}>
-                        <MaterialCommunityIcons
-                          name={option.icon as any}
-                          size={24}
-                          color={isSelected ? statusColor : '#94A3B8'}
-                        />
-                      </View>
-                      <Text style={[
-                        styles.userResponseText,
-                        isSelected && { color: statusColor, fontWeight: '600' }
-                      ]}>
-                        {option.label}
-                      </Text>
-                      {isSelected && (
-                        <View style={[styles.userResponseCheckmark, { backgroundColor: statusColor }]}>
-                          <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                    return (
+                      <TouchableOpacity
+                        key={status.id}
+                        style={[
+                          styles.userResponseCard,
+                          isSelected && { backgroundColor: statusColor + '15', borderColor: statusColor }
+                        ]}
+                        onPress={() => {
+                          setEditingCaseStatusId(status.id);
+                          setEditingCaseStatus(status.name);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[
+                          styles.userResponseIconContainer,
+                          isSelected && { backgroundColor: statusColor + '20' }
+                        ]}>
+                          <MaterialCommunityIcons
+                            name={(status.icon || 'file-document') as any}
+                            size={24}
+                            color={isSelected ? statusColor : '#94A3B8'}
+                          />
                         </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+                        <Text style={[
+                          styles.userResponseText,
+                          isSelected && { color: statusColor, fontWeight: '600' }
+                        ]}>
+                          {status.name}
+                        </Text>
+                        {isSelected && (
+                          <View style={[styles.userResponseCheckmark, { backgroundColor: statusColor }]}>
+                            <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  caseStatusOptions.map((option) => {
+                    const isSelected = editingCaseStatus === option.value;
+                    const statusColor = option.color;
+
+                    return (
+                      <TouchableOpacity
+                        key={option.value || 'null'}
+                        style={[
+                          styles.userResponseCard,
+                          isSelected && { backgroundColor: statusColor + '15', borderColor: statusColor }
+                        ]}
+                        onPress={() => setEditingCaseStatus(option.value)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[
+                          styles.userResponseIconContainer,
+                          isSelected && { backgroundColor: statusColor + '20' }
+                        ]}>
+                          <MaterialCommunityIcons
+                            name={option.icon as any}
+                            size={24}
+                            color={isSelected ? statusColor : '#94A3B8'}
+                          />
+                        </View>
+                        <Text style={[
+                          styles.userResponseText,
+                          isSelected && { color: statusColor, fontWeight: '600' }
+                        ]}>
+                          {option.label}
+                        </Text>
+                        {isSelected && (
+                          <View style={[styles.userResponseCheckmark, { backgroundColor: statusColor }]}>
+                            <MaterialCommunityIcons name="check" size={12} color="#fff" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
               </View>
             </View>
           </ScrollView>
@@ -3461,6 +5072,280 @@ export default function CaseDetailScreen() {
             >
               <MaterialCommunityIcons name="check" size={20} color="#fff" />
               <Text style={styles.workflowSaveButtonText}>შენახვა</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Case Type Modal */}
+      <Portal>
+        <Modal
+          visible={showCaseTypeModal}
+          onDismiss={() => setShowCaseTypeModal(false)}
+          contentContainerStyle={styles.caseTypeModal}
+        >
+          <View style={styles.caseTypeModalHeader}>
+            <View style={styles.caseTypeModalTitleRow}>
+              <MaterialCommunityIcons name="tag" size={24} color={COLORS.primary} />
+              <Text style={styles.caseTypeModalTitle}>საქმის ტიპი</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowCaseTypeModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.caseTypeOptionsContainer}>
+            {caseTypeOptions.map((option) => (
+              <TouchableOpacity
+                key={option.value || 'null'}
+                style={[
+                  styles.caseTypeOption,
+                  caseType === option.value && styles.caseTypeOptionSelected,
+                  { borderColor: option.color + '40' }
+                ]}
+                onPress={() => handleSaveCaseType(option.value)}
+              >
+                <View style={[styles.caseTypeOptionIcon, { backgroundColor: option.color + '15' }]}>
+                  <MaterialCommunityIcons name={option.icon as any} size={24} color={option.color} />
+                </View>
+                <Text style={[
+                  styles.caseTypeOptionLabel,
+                  caseType === option.value && { color: option.color, fontWeight: '700' }
+                ]}>
+                  {option.label}
+                </Text>
+                {caseType === option.value && (
+                  <MaterialCommunityIcons name="check-circle" size={24} color={option.color} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* Mechanic Selection Modal */}
+      <Portal>
+        <Modal
+          visible={showMechanicModal}
+          onDismiss={() => setShowMechanicModal(false)}
+          contentContainerStyle={styles.caseTypeModal}
+        >
+          <View style={styles.caseTypeModalHeader}>
+            <View style={styles.caseTypeModalTitleRow}>
+              <MaterialCommunityIcons name="account-wrench" size={24} color="#6366F1" />
+              <Text style={styles.caseTypeModalTitle}>მექანიკოსის მინიჭება</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowMechanicModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.caseTypeOptionsContainer}>
+            {loadingMechanics ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#6366F1" />
+                <Text style={{ color: COLORS.text.secondary, marginTop: 12 }}>იტვირთება მექანიკოსები...</Text>
+              </View>
+            ) : (
+              mechanicOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value || 'null'}
+                  style={[
+                    styles.caseTypeOption,
+                    assignedMechanic === option.value && styles.caseTypeOptionSelected,
+                    { borderColor: '#6366F1' + '40' }
+                  ]}
+                  onPress={() => handleSaveMechanic(option.value)}
+                  disabled={savingMechanic}
+                >
+                  <View style={[styles.caseTypeOptionIcon, { backgroundColor: '#6366F1' + '15' }]}>
+                    <MaterialCommunityIcons 
+                      name={option.value ? "account" : "account-off"} 
+                      size={24} 
+                      color={option.value ? '#6366F1' : '#94A3B8'} 
+                    />
+                  </View>
+                  <Text style={[
+                    styles.caseTypeOptionLabel,
+                    assignedMechanic === option.value && { color: '#6366F1', fontWeight: '700' }
+                  ]}>
+                    {option.label}
+                  </Text>
+                  {assignedMechanic === option.value && (
+                    <MaterialCommunityIcons name="check-circle" size={24} color="#6366F1" />
+                  )}
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+
+          {savingMechanic && (
+            <View style={styles.mechanicSavingOverlay}>
+              <ActivityIndicator size="large" color="#6366F1" />
+            </View>
+          )}
+        </Modal>
+      </Portal>
+
+      {/* Nachrebi Qty Modal */}
+      <Portal>
+        <Modal
+          visible={showNachrebiQtyModal}
+          onDismiss={() => setShowNachrebiQtyModal(false)}
+          contentContainerStyle={styles.caseTypeModal}
+        >
+          <View style={styles.caseTypeModalHeader}>
+            <View style={styles.caseTypeModalTitleRow}>
+              <MaterialCommunityIcons name="package-variant" size={24} color="#10B981" />
+              <Text style={styles.caseTypeModalTitle}>ნაჭრების რაოდენობა</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setShowNachrebiQtyModal(false)}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <View style={styles.caseTypeOptionsContainer}>
+            <TextInput
+              label="რაოდენობა"
+              value={editingNachrebiQty}
+              onChangeText={setEditingNachrebiQty}
+              mode="outlined"
+              keyboardType="numeric"
+              style={[styles.modernInput, { marginBottom: 16 }]}
+              outlineStyle={styles.inputOutline}
+              left={<TextInput.Icon icon="package-variant" />}
+              placeholder="მაგ: 3"
+            />
+            
+            <View style={styles.modernEditActions}>
+              <Button
+                mode="outlined"
+                onPress={() => setShowNachrebiQtyModal(false)}
+                style={styles.modernButton}
+                textColor={COLORS.text.secondary}
+              >
+                გაუქმება
+              </Button>
+              <Button
+                mode="contained"
+                onPress={handleSaveNachrebiQty}
+                style={[styles.modernButton, styles.primaryButton]}
+                buttonColor="#10B981"
+              >
+                შენახვა
+              </Button>
+            </View>
+          </View>
+        </Modal>
+      </Portal>
+
+      {/* SMS Settings Modal */}
+      <Portal>
+        <Modal
+          visible={smsSettingsVisible}
+          onDismiss={() => {
+            cancelEditingPhone();
+            setSmsSettingsVisible(false);
+          }}
+          contentContainerStyle={styles.smsSettingsModal}
+        >
+          <View style={styles.smsSettingsHeader}>
+            <View style={styles.smsSettingsTitleRow}>
+              <MaterialCommunityIcons name="message-cog" size={24} color="#2196F3" />
+              <Text style={styles.smsSettingsTitle}>SMS პარამეტრები</Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => {
+                cancelEditingPhone();
+                setSmsSettingsVisible(false);
+              }}
+              iconColor={COLORS.text.primary}
+            />
+          </View>
+
+          <Text style={styles.smsSettingsSubtitle}>აირჩიეთ SMS მიმღებები:</Text>
+
+          <ScrollView style={styles.smsRecipientsList}>
+            {smsRecipients.map((recipient) => (
+              <View key={recipient.id} style={styles.smsRecipientRow}>
+                <TouchableOpacity
+                  style={styles.smsRecipientCheckbox}
+                  onPress={() => toggleRecipient(recipient.id)}
+                >
+                  <MaterialCommunityIcons
+                    name={recipient.enabled ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                    size={28}
+                    color={recipient.enabled ? '#2196F3' : COLORS.text.disabled}
+                  />
+                </TouchableOpacity>
+                
+                <View style={styles.smsRecipientInfo}>
+                  <Text style={styles.smsRecipientName}>{recipient.name}</Text>
+                  
+                  {editingRecipient === recipient.id ? (
+                    <View style={styles.smsPhoneEditContainer}>
+                      <TextInput
+                        style={styles.smsPhoneInput}
+                        value={editingPhone}
+                        onChangeText={setEditingPhone}
+                        keyboardType="phone-pad"
+                        autoFocus
+                        placeholder="ტელეფონის ნომერი"
+                        mode="outlined"
+                        dense
+                      />
+                      <TouchableOpacity
+                        style={styles.smsSavePhoneButton}
+                        onPress={saveEditedPhone}
+                      >
+                        <MaterialCommunityIcons name="check" size={20} color="#fff" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.smsCancelPhoneButton}
+                        onPress={cancelEditingPhone}
+                      >
+                        <MaterialCommunityIcons name="close" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={styles.smsPhoneDisplayContainer}>
+                      <Text style={styles.smsRecipientPhone}>{recipient.phone}</Text>
+                      <TouchableOpacity
+                        style={styles.smsEditPhoneButton}
+                        onPress={() => startEditingPhone(recipient)}
+                      >
+                        <MaterialCommunityIcons name="pencil" size={18} color="#2196F3" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+
+          <View style={styles.smsSettingsFooter}>
+            <Text style={styles.smsSelectedCount}>
+              არჩეული: {getEnabledRecipients().length} მიმღები
+            </Text>
+            <TouchableOpacity
+              style={styles.smsCloseButton}
+              onPress={() => {
+                cancelEditingPhone();
+                setSmsSettingsVisible(false);
+              }}
+            >
+              <Text style={styles.smsCloseButtonText}>დახურვა</Text>
             </TouchableOpacity>
           </View>
         </Modal>
@@ -4096,6 +5981,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 8,
   },
+  smsSentBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#10B981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
 
   scrollView: {
     flex: 1,
@@ -4188,6 +6086,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
   },
   workflowLabelText: {
     fontSize: 14,
@@ -4198,6 +6097,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   workflowStatusText: {
     fontSize: 13,
@@ -4434,7 +6336,190 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9',
   },
 
+  // Voice Notes styles
+  recordingContainer: {
+    backgroundColor: '#8B5CF615',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 10,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#EF4444',
+  },
+  recordingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  recordingActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+  },
+  recordingButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelRecordingButton: {
+    backgroundColor: '#FEE2E2',
+  },
+  stopRecordingButton: {
+    backgroundColor: '#8B5CF6',
+  },
+  savingVoiceNoteContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    gap: 10,
+  },
+  savingVoiceNoteText: {
+    fontSize: 14,
+    color: '#8B5CF6',
+    fontWeight: '500',
+  },
+  voiceNotesList: {
+    marginTop: 8,
+  },
+  voiceNoteItem: {
+    paddingVertical: 12,
+  },
+  voiceNoteInfo: {
+    flex: 1,
+  },
+  voiceNoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  voiceNoteAuthor: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  voiceNoteDuration: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    backgroundColor: '#8B5CF615',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  voiceNoteDate: {
+    fontSize: 12,
+    color: COLORS.text.disabled,
+    marginTop: 4,
+  },
+  voiceNoteActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  voiceNotePlayButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#8B5CF615',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceNotePlayingButton: {
+    backgroundColor: '#8B5CF6',
+  },
+  voiceNoteDeleteButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
   // Add Note Modal styles
+  // Case Type Modal Styles
+  caseTypeModal: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  caseTypeModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  caseTypeModalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  caseTypeModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  caseTypeOptionsContainer: {
+    padding: 16,
+    gap: 12,
+  },
+  caseTypeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#fff',
+    gap: 14,
+  },
+  caseTypeOptionSelected: {
+    borderWidth: 2,
+    backgroundColor: '#F8FAFC',
+  },
+  caseTypeOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  caseTypeOptionLabel: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+  },
+  mechanicSavingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 24,
+  },
+
   addNoteModal: {
     backgroundColor: '#fff',
     marginHorizontal: 20,
@@ -4950,6 +7035,16 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: COLORS.primary,
+  },
+  partPriceDeleteContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  deletePartButton: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: COLORS.error + '10',
   },
   servicePriceContainer: {
     alignItems: 'flex-end',
@@ -5496,6 +7591,16 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     letterSpacing: 0.5,
   },
+  modalQuantityInput: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    minWidth: 50,
+  },
 
   // Image Modal (keep existing styles)
   imageModal: {
@@ -5740,6 +7845,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.primary,
+  },
+  emptyStateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: COLORS.accent + '10',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.accent + '30',
+    borderStyle: 'dashed',
+    gap: 8,
+    marginTop: 8,
+  },
+  emptyStateButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.accent,
   },
   discountBadge: {
     backgroundColor: COLORS.success,
@@ -6136,5 +8260,125 @@ const styles = StyleSheet.create({
   },
   saveTagButton: {
     flex: 1,
+  },
+  
+  // SMS Settings Modal Styles
+  smsSettingsModal: {
+    backgroundColor: '#fff',
+    margin: 20,
+    borderRadius: 16,
+    maxHeight: '80%',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  smsSettingsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  smsSettingsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  smsSettingsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  smsSettingsSubtitle: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  smsRecipientsList: {
+    paddingHorizontal: 20,
+    maxHeight: 300,
+  },
+  smsRecipientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline + '50',
+  },
+  smsRecipientCheckbox: {
+    marginRight: 12,
+  },
+  smsRecipientInfo: {
+    flex: 1,
+  },
+  smsRecipientName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text.primary,
+    marginBottom: 4,
+  },
+  smsRecipientPhone: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  smsPhoneDisplayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  smsEditPhoneButton: {
+    padding: 4,
+  },
+  smsPhoneEditContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  smsPhoneInput: {
+    flex: 1,
+    height: 40,
+    backgroundColor: '#fff',
+  },
+  smsSavePhoneButton: {
+    backgroundColor: '#10B981',
+    borderRadius: 8,
+    padding: 8,
+  },
+  smsCancelPhoneButton: {
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    padding: 8,
+  },
+  smsSettingsFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+    marginTop: 8,
+  },
+  smsSelectedCount: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+  },
+  smsCloseButton: {
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  smsCloseButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

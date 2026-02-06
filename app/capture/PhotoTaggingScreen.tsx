@@ -418,10 +418,10 @@ export default function PhotoTaggingScreen() {
   };
 
   const adjustPrice = (direction: 'up' | 'down') => {
-    const increment = 10; // 10 GEL increments
+    const increment = 0.5; // 0.5 GEL increments for decimal support
     const newPrice = direction === 'up' 
-      ? tempPrice + increment 
-      : Math.max(tempPrice - increment, 0);
+      ? Math.round((tempPrice + increment) * 100) / 100
+      : Math.max(Math.round((tempPrice - increment) * 100) / 100, 0);
     
     setTempPrice(newPrice);
     
@@ -744,7 +744,10 @@ export default function PhotoTaggingScreen() {
           </View>
           <View style={styles.tagLabel}>
             <Text style={styles.tagText}>{tag.serviceNameKa || tag.serviceName}</Text>
-            <Text style={styles.tagPrice}>{formatCurrencyGEL(tag.price)}</Text>
+            <Text style={styles.tagPrice}>{formatCurrencyGEL(tag.price * (tag.count || 1))}</Text>
+            {tag.count && tag.count !== 1 && (
+              <Text style={styles.tagQuantity}>qty: {tag.count}</Text>
+            )}
           </View>
         </TouchableOpacity>
       </View>
@@ -1067,29 +1070,42 @@ export default function PhotoTaggingScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.priceHint}>დააჭირეთ + ან - ფასის შესაცვლელად 10 ლარით</Text>
+          <Text style={styles.priceHint}>დააჭირეთ + ან - ფასის შესაცვლელად 0.5 ლარით</Text>
 
           {/* Quantity Adjustment */}
           <View style={styles.quantitySection}>
             <Text style={styles.quantityLabel}>რაოდენობა</Text>
             <View style={styles.quantityControl}>
               <TouchableOpacity
-                style={[styles.quantityButton, tempQuantity <= 1 && styles.quantityButtonDisabled]}
-                onPress={() => setTempQuantity(Math.max(1, tempQuantity - 1))}
-                disabled={tempQuantity <= 1}
+                style={[styles.quantityButton, tempQuantity <= 0.1 && styles.quantityButtonDisabled]}
+                onPress={() => setTempQuantity(Math.max(0.1, Math.round((tempQuantity - 0.5) * 10) / 10))}
+                disabled={tempQuantity <= 0.1}
               >
                 <MaterialCommunityIcons 
                   name="minus" 
                   size={20} 
-                  color={tempQuantity <= 1 ? COLORS.text.disabled : COLORS.primary} 
+                  color={tempQuantity <= 0.1 ? COLORS.text.disabled : COLORS.primary} 
                 />
               </TouchableOpacity>
-              <View style={styles.quantityDisplay}>
-                <Text style={styles.quantityText}>{tempQuantity}</Text>
-              </View>
+              <TextInput
+                mode="outlined"
+                value={tempQuantity.toString()}
+                onChangeText={(text) => {
+                  const numValue = parseFloat(text.replace(/[^0-9.]/g, ''));
+                  if (!isNaN(numValue) && numValue >= 0) {
+                    setTempQuantity(numValue);
+                  } else if (text === '' || text === '0') {
+                    setTempQuantity(0);
+                  }
+                }}
+                keyboardType="decimal-pad"
+                style={{ width: 80, height: 44, textAlign: 'center' }}
+                contentStyle={{ textAlign: 'center', paddingHorizontal: 0 }}
+                dense
+              />
               <TouchableOpacity
                 style={styles.quantityButton}
-                onPress={() => setTempQuantity(tempQuantity + 1)}
+                onPress={() => setTempQuantity(Math.round((tempQuantity + 0.5) * 10) / 10)}
               >
                 <MaterialCommunityIcons name="plus" size={20} color={COLORS.primary} />
               </TouchableOpacity>
@@ -1101,7 +1117,7 @@ export default function PhotoTaggingScreen() {
             label="შეიყვანეთ ფასი ხელით"
             value={tempPrice.toString()}
             onChangeText={handleManualPriceChange}
-            keyboardType="numeric"
+            keyboardType="decimal-pad"
             left={<TextInput.Affix text="₾" />}
             style={styles.manualPriceInput}
             dense
@@ -1295,6 +1311,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
     marginTop: 2,
+  },
+  tagQuantity: {
+    color: COLORS.text.onPrimary,
+    fontSize: 9,
+    fontWeight: '400',
+    marginTop: 1,
+    opacity: 0.8,
   },
   instructionOverlay: {
     position: 'absolute',

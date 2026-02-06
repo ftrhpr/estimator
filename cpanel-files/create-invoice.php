@@ -70,6 +70,9 @@ try {
         vat_amount,
         vat_rate,
         subtotal_before_vat,
+        nachrebi_qty,
+        status_id,
+        repair_status_id,
         slug
     ) VALUES (
         :plate,
@@ -95,6 +98,9 @@ try {
         :vat_amount,
         :vat_rate,
         :subtotal_before_vat,
+        :nachrebi_qty,
+        :status_id,
+        :repair_status_id,
         :slug
     )";
     
@@ -317,6 +323,9 @@ try {
         ':vat_amount' => floatval($data['vatAmount'] ?? 0),
         ':vat_rate' => floatval($data['vatRate'] ?? 0),
         ':subtotal_before_vat' => floatval($data['subtotalBeforeVAT'] ?? 0),
+        ':nachrebi_qty' => !empty($data['nachrebi_qty']) ? floatval($data['nachrebi_qty']) : null,
+        ':status_id' => !empty($data['status_id']) ? intval($data['status_id']) : (!empty($data['statusId']) ? intval($data['statusId']) : null),
+        ':repair_status_id' => !empty($data['repair_status_id']) ? intval($data['repair_status_id']) : (!empty($data['repairStatusId']) ? intval($data['repairStatusId']) : null),
         ':slug' => $slug
     ]);
     

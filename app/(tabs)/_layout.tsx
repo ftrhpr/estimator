@@ -19,12 +19,12 @@ export default function TabLayout() {
           borderTopColor: COLORS.outline,
           paddingTop: SPACING.sm,
           paddingBottom: SPACING.sm,
-          height: 65,
+          height: 68,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
-          marginTop: 2,
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 4,
         },
       }}>
       <Tabs.Screen
@@ -54,12 +54,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="customers"
+        name="service"
         options={{
-          title: 'Customers',
+          title: 'სერვისში',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons 
-              name={focused ? 'account-group' : 'account-group-outline'} 
+              name={focused ? 'car-wrench' : 'car-cog'} 
               size={24} 
               color={color} 
             />
@@ -67,14 +67,40 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="admin/cpanel-inspections"
+        name="completed"
         options={{
-          title: 'cPanel',
+          title: 'დასრულებული',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons 
-              name={focused ? 'database' : 'database-outline'} 
+              name={focused ? 'check-circle' : 'check-circle-outline'} 
               size={24} 
               color={color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="customers"
+        options={{
+          title: 'Customers',
+          tabBarIcon: ({ color, focused }) => (
+            <MaterialCommunityIcons
+              name={focused ? 'account-group' : 'account-group-outline'}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="analytics"
+        options={{
+          title: 'Analytics',
+          tabBarIcon: ({ color, focused }) => (
+            <MaterialCommunityIcons
+              name={focused ? 'chart-box' : 'chart-box-outline'}
+              size={24}
+              color={color}
             />
           ),
         }}

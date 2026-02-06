@@ -54,15 +54,71 @@ try {
     
     $parts = [];
     if (!empty($invoice['repair_parts'])) {
-        $parts = json_decode($invoice['repair_parts'], true) ?? [];
+        $rawParts = json_decode($invoice['repair_parts'], true) ?? [];
+        // Transform parts to app format
+        $parts = array_map(function($part) {
+            $quantity = intval($part['quantity'] ?? 1);
+            $unitPrice = floatval($part['unit_price'] ?? $part['unitPrice'] ?? 0);
+            $totalPrice = floatval($part['total_price'] ?? $part['totalPrice'] ?? 0);
+
+            // Calculate totalPrice if it's 0 but unitPrice exists
+            if ($totalPrice == 0 && $unitPrice > 0) {
+                $totalPrice = $unitPrice * $quantity;
+            }
+
+            // Include damages (tagged work) if present
+            $damages = [];
+            if (!empty($part['damages']) && is_array($part['damages'])) {
+                $damages = $part['damages'];
+            }
+
+            return [
+                'name' => $part['name'] ?? $part['name_en'] ?? 'Unknown Part',
+                'nameKa' => $part['name'] ?? $part['name_en'] ?? 'უცნობი ნაწილი',
+                'partName' => $part['partName'] ?? $part['name'] ?? $part['name_en'] ?? 'Unknown Part',
+                'partNumber' => $part['part_number'] ?? $part['partNumber'] ?? '',
+                'quantity' => $quantity,
+                'unitPrice' => $unitPrice,
+                'totalPrice' => $totalPrice,
+                'notes' => $part['notes'] ?? '',
+                'damages' => $damages,
+            ];
+        }, $rawParts);
     }
-    
+
     // Transform repair_labor back to app format
     $services = array_map(function($labor) {
+        // CPanel stores service name in 'description' field, app uses 'name'
+        $laborName = $labor['name'] ?? $labor['description'] ?? 'Unknown Service';
+
+        // Get quantity - CPanel uses 'quantity', app uses 'hours' or 'count'
+        $serviceCount = floatval($labor['quantity'] ?? $labor['hours'] ?? $labor['count'] ?? 1);
+
+        // Get unit rate - CPanel uses 'unit_rate'
+        $unitRate = floatval($labor['unit_rate'] ?? $labor['rate'] ?? $labor['hourly_rate'] ?? 0);
+
+        // Calculate total price = unit_rate * quantity
+        $servicePrice = floatval($labor['price'] ?? 0);
+        if ($servicePrice == 0 && $unitRate > 0) {
+            $servicePrice = $unitRate * $serviceCount;
+        }
+
+        // If still 0, try total_price or amount fields
+        if ($servicePrice == 0) {
+            $servicePrice = floatval($labor['total_price'] ?? $labor['amount'] ?? $labor['total'] ?? 0);
+        }
+
         return [
-            'serviceName' => $labor['name'] ?? $labor['description'] ?? 'Unknown Service',
-            'price' => floatval($labor['price'] ?? $labor['rate'] ?? $labor['hourly_rate'] ?? 0),
-            'count' => intval($labor['hours'] ?? 1),
+            'serviceName' => $laborName,
+            'serviceNameKa' => $laborName,
+            'name' => $laborName,
+            'nameKa' => $laborName,
+            'price' => $servicePrice,
+            'count' => $serviceCount,
+            'unitRate' => $unitRate,
+            'discount_percent' => floatval($labor['discount_percent'] ?? 0),
+            'discountedPrice' => floatval($labor['discounted_price'] ?? $servicePrice),
+            'billable' => $labor['billable'] ?? true,
         ];
     }, $repairLabor);
     
@@ -86,8 +142,16 @@ try {
         'vatRate' => floatval($invoice['vat_rate'] ?? 0),
         'subtotalBeforeVAT' => floatval($invoice['subtotal_before_vat'] ?? 0),
         'serviceDate' => $invoice['serviceDate'] ?? $invoice['service_date'] ?? null,
-        'updatedAt' => $invoice['updatedAt'] ?? null,
+        'updatedAt' => $invoice['updatedAt'] ?? $invoice['updated_at'] ?? null,
         'internalNotes' => !empty($invoice['internalNotes']) ? json_decode($invoice['internalNotes'], true) : [],
+        'caseType' => $invoice['case_type'] ?? null,
+        'assigned_mechanic' => $invoice['assigned_mechanic'] ?? null,
+        'assignedMechanic' => $invoice['assigned_mechanic'] ?? null,
+        'nachrebi_qty' => isset($invoice['nachrebi_qty']) ? floatval($invoice['nachrebi_qty']) : null,
+        'status_id' => isset($invoice['status_id']) ? intval($invoice['status_id']) : null,
+        'statusId' => isset($invoice['status_id']) ? intval($invoice['status_id']) : null,
+        'repair_status_id' => isset($invoice['repair_status_id']) ? intval($invoice['repair_status_id']) : null,
+        'repairStatusId' => isset($invoice['repair_status_id']) ? intval($invoice['repair_status_id']) : null,
     ];
     
     error_log("Invoice fetched successfully. ID: " . $invoice['id']);

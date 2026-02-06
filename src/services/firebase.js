@@ -106,6 +106,42 @@ export const deleteImage = async (downloadURL) => {
   }
 };
 
+/**
+ * Upload a voice note to Firebase Storage
+ * @param {string} uri - Local audio file URI
+ * @param {string} inspectionId - Inspection ID for folder organization
+ * @returns {Promise<string>} Download URL
+ */
+export const uploadVoiceNoteToStorage = async (uri, inspectionId) => {
+  try {
+    console.log('[Firebase] Uploading voice note from:', uri);
+    
+    // Fetch the audio file as a blob
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    
+    // Create unique filename with timestamp
+    const timestamp = Date.now();
+    const fileName = `voice_note_${timestamp}.m4a`;
+    const path = `inspections/${inspectionId}/voice_notes/${fileName}`;
+    
+    // Create storage reference
+    const storageRef = ref(storage, path);
+    
+    // Upload the blob
+    await uploadBytes(storageRef, blob);
+    
+    // Get and return the download URL
+    const downloadURL = await getDownloadURL(storageRef);
+    console.log('[Firebase] Voice note uploaded successfully:', downloadURL);
+    
+    return downloadURL;
+  } catch (error) {
+    console.error('[Firebase] Error uploading voice note:', error);
+    throw error;
+  }
+};
+
 // ==================== FIRESTORE FUNCTIONS ====================
 
 /**
@@ -308,6 +344,31 @@ const syncToCPanel = async (inspectionId, updates, cpanelInvoiceId, docRef) => {
       }
       
       const result = await updateInvoiceToCPanel(cpanelId, cpanelUpdates);
+      
+      // If invoice not found in cPanel, create it instead
+      if (!result.success && result.error && result.error.includes('not found')) {
+        console.log('[Firebase] cPanel invoice not found, creating new one...');
+        const { getDoc } = await import('firebase/firestore');
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const fullData = { ...docSnap.data(), ...updates };
+          const createResult = await syncInvoiceToCPanel(fullData, inspectionId);
+          
+          // Save the new cPanel ID to Firebase
+          if (createResult.success && createResult.cpanelId) {
+            try {
+              await updateDoc(docRef, { cpanelInvoiceId: createResult.cpanelId });
+              console.log('[Firebase] Saved new cPanel ID to Firebase:', createResult.cpanelId);
+            } catch (err) {
+              console.warn('[Firebase] Failed to save new cPanel ID:', err);
+            }
+          }
+          
+          return createResult;
+        }
+      }
+      
       return { ...result, cpanelId };
     }
     

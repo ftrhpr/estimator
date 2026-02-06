@@ -16,6 +16,10 @@ export default function HomeScreen() {
     router.push('/services/ServiceSettingsScreen');
   };
 
+  const handlePlateScanner = () => {
+    router.push('/scan');
+  };
+
   const features = [
     {
       icon: 'barcode-scan',
@@ -109,6 +113,39 @@ export default function HomeScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
+          {/* Plate Scanner Button */}
+          <TouchableOpacity 
+            style={[styles.primaryCard, styles.plateScannerCard]}
+            onPress={handlePlateScanner}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#6366F1', '#818CF8']}
+              style={styles.cardGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.cardContent}>
+                <MaterialCommunityIcons 
+                  name="car-search" 
+                  size={32} 
+                  color={COLORS.text.onPrimary} 
+                />
+                <View style={styles.cardText}>
+                  <Text style={styles.primaryCardTitle}>🔍 ნომრის სკანერი</Text>
+                  <Text style={styles.primaryCardSubtitle}>
+                    დაასკანერე ნომერი და იპოვე საქმე
+                  </Text>
+                </View>
+                <MaterialCommunityIcons 
+                  name="chevron-right" 
+                  size={24} 
+                  color={COLORS.text.onPrimary} 
+                />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+
           <TouchableOpacity 
             style={styles.secondaryCard}
             onPress={handleServiceSettings}
@@ -185,6 +222,22 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
       
+      {/* Floating Scan Button */}
+      <TouchableOpacity
+        style={styles.fabScan}
+        onPress={handlePlateScanner}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={['#6366F1', '#818CF8']}
+          style={styles.fabGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <MaterialCommunityIcons name="car-search" size={24} color={COLORS.text.onPrimary} />
+        </LinearGradient>
+      </TouchableOpacity>
+
       {/* Floating Action Button */}
       <TouchableOpacity
         style={styles.fab}
@@ -256,6 +309,9 @@ const styles = StyleSheet.create({
     // Custom styles for the main card
   },
   quickCaptureCard: {
+    marginBottom: SPACING.md,
+  },
+  plateScannerCard: {
     marginBottom: SPACING.md,
   },
   cardGradient: {
@@ -383,6 +439,15 @@ const styles = StyleSheet.create({
     height: 56,
     right: SPACING.lg,
     bottom: SPACING.lg,
+    borderRadius: BORDER_RADIUS.full,
+    ...SHADOWS.lg,
+  },
+  fabScan: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    right: SPACING.lg,
+    bottom: SPACING.lg + 70,
     borderRadius: BORDER_RADIUS.full,
     ...SHADOWS.lg,
   },

@@ -104,6 +104,20 @@ const transformServicesToGeorgian = (services) => {
   });
 };
 
+/**
+ * Map app status values to cPanel status values
+ * @param {string} appStatus - Status from the app
+ * @returns {string} Status for cPanel
+ */
+const mapStatusToCPanel = (appStatus) => {
+  const statusMap = {
+    'In Service': 'Already in service', // App uses "In Service", cPanel uses "Already in service"
+    'Already in service': 'Already in service',
+  };
+  
+  return statusMap[appStatus] || appStatus;
+};
+
 // Check if cPanel integration is configured
 export const isCPanelConfigured = () => {
   return CPANEL_API_URL && CPANEL_API_KEY;
@@ -126,6 +140,7 @@ const makeRequest = async (endpoint, data = null, method = 'POST') => {
         'Content-Type': 'application/json',
         'X-API-Key': CPANEL_API_KEY,
         'Accept': 'application/json',
+        'User-Agent': 'AutoBodyEstimator/1.0 (Mobile App)',
       },
     };
     
@@ -448,6 +463,12 @@ export const updateInvoiceToCPanel = async (invoiceId, updateData) => {
       services: transformedServices, // Use transformed services
     };
     
+    // Map status to cPanel format if provided
+    if (payload.status) {
+      payload.status = mapStatusToCPanel(payload.status);
+      console.log('[cPanel API] Status mapped:', updateData.status, '->', payload.status);
+    }
+    
     // Log the final services in payload
     console.log('[cPanel API] FINAL payload.services:', JSON.stringify(payload.services, null, 2));
     
@@ -692,6 +713,55 @@ export const deletePaymentFromCPanel = async (paymentId) => {
   }
 };
 
+/**
+ * Fetch list of mechanics from cPanel database
+ * @returns {Promise<{success: boolean, mechanics: Array<{id: number, name: string}>, error?: string}>}
+ */
+export const fetchMechanicsFromCPanel = async () => {
+  if (!isCPanelConfigured()) {
+    return { success: false, mechanics: [], error: 'cPanel API not configured' };
+  }
+
+  try {
+    console.log('[cPanel API] Fetching mechanics list');
+    const response = await makeRequest('get-mechanics.php', null, 'GET');
+
+    if (response.success && response.data) {
+      console.log(`[cPanel API] Fetched ${response.data.mechanics?.length || 0} mechanics`);
+      return {
+        success: true,
+        mechanics: response.data.mechanics || [],
+      };
+    }
+
+    return { success: false, mechanics: [], error: response.error };
+  } catch (error) {
+    console.error('[cPanel API] Error fetching mechanics:', error);
+    return { success: false, mechanics: [], error: error.message };
+  }
+};
+
+/**
+ * Generic fetch from cPanel API
+ * @param {string} endpoint - API endpoint (e.g., 'get-statuses.php')
+ * @param {object} options - Request options with method and optional data
+ * @returns {Promise<object>} API response
+ */
+export const fetchFromCPanel = async (endpoint, options = {}) => {
+  console.log('[cpanelService] fetchFromCPanel called with endpoint:', endpoint);
+  console.log('[cpanelService] CPANEL_API_URL:', CPANEL_API_URL ? 'SET' : 'NOT SET');
+  console.log('[cpanelService] CPANEL_API_KEY:', CPANEL_API_KEY ? 'SET (length: ' + CPANEL_API_KEY.length + ')' : 'NOT SET');
+  
+  if (!isCPanelConfigured()) {
+    throw new Error('cPanel API not configured');
+  }
+
+  const method = options.method || 'GET';
+  const data = options.data || null;
+
+  return await makeRequest(endpoint, data, method);
+};
+
 export default {
   testConnection,
   syncInvoiceToCPanel,
@@ -705,5 +775,7 @@ export default {
   fetchPaymentsFromCPanel,
   createPaymentInCPanel,
   deletePaymentFromCPanel,
+  fetchMechanicsFromCPanel,
+  fetchFromCPanel,
   isCPanelConfigured,
 };

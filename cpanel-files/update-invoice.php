@@ -54,6 +54,7 @@ try {
         'user_response' => 'user_response',
         'services' => 'repair_labor',
         'parts' => 'repair_parts',
+        'inventoryParts' => 'repair_parts',
         'images' => 'case_images',
         'photos' => 'case_images',
         'imageUrls' => 'case_images',
@@ -70,6 +71,15 @@ try {
         'vatRate' => 'vat_rate',
         'subtotalBeforeVAT' => 'subtotal_before_vat',
         'internalNotes' => 'internalNotes',
+        'voiceNotes' => 'voiceNotes',
+        'caseType' => 'case_type',
+        'assignedMechanic' => 'assigned_mechanic',
+        'assigned_mechanic' => 'assigned_mechanic',
+        'nachrebi_qty' => 'nachrebi_qty',
+        'status_id' => 'status_id',
+        'statusId' => 'status_id',
+        'repair_status_id' => 'repair_status_id',
+        'repairStatusId' => 'repair_status_id',
     ];
     
     // Debug: Log all received data keys and image fields
@@ -99,7 +109,7 @@ try {
         $shouldProcess = false;
         if (in_array($dbField, ['vat_enabled', 'vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
             $shouldProcess = array_key_exists($appField, $data);
-        } elseif (in_array($dbField, ['repair_status', 'user_response', 'status'])) {
+        } elseif (in_array($dbField, ['repair_status', 'user_response', 'status', 'assigned_mechanic', 'status_id', 'repair_status_id'])) {
             // These fields should be processed even if they are null (to allow clearing)
             $shouldProcess = array_key_exists($appField, $data);
         } else {
@@ -115,11 +125,19 @@ try {
             }
             
             // Handle discount and VAT fields as floats - allow empty strings to be 0
-            if (in_array($dbField, ['services_discount_percent', 'parts_discount_percent', 'global_discount_percent', 'vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
+            if (in_array($dbField, ['services_discount_percent', 'parts_discount_percent', 'global_discount_percent', 'vat_amount', 'vat_rate', 'subtotal_before_vat', 'nachrebi_qty'])) {
                 $value = floatval($value ?? 0);
                 if (in_array($dbField, ['vat_amount', 'vat_rate', 'subtotal_before_vat'])) {
                     error_log("Converted VAT field $dbField to float: $value");
                 }
+                // Handle nachrebi_qty - allow null if empty
+                if ($dbField === 'nachrebi_qty' && empty($value)) {
+                    $value = null;
+                }
+            }
+            // Handle integer fields
+            elseif (in_array($dbField, ['status_id', 'repair_status_id'])) {
+                $value = !empty($value) ? intval($value) : null;
             }
             // Handle boolean VAT enabled field
             elseif ($dbField === 'vat_enabled') {
@@ -137,6 +155,11 @@ try {
             elseif ($dbField === 'internalNotes' && is_array($value)) {
                 $value = json_encode($value, JSON_UNESCAPED_UNICODE);
                 error_log("Internal notes transformed for update: " . $value);
+            }
+            // Handle voiceNotes as JSON array
+            elseif ($dbField === 'voiceNotes' && is_array($value)) {
+                $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+                error_log("Voice notes transformed for update: " . $value);
             }
             // Handle JSON fields for arrays
             elseif (is_array($value) && in_array($dbField, ['repair_labor', 'repair_parts', 'case_images'])) {
@@ -303,6 +326,20 @@ try {
     // If no fields to update, return error
     if (empty($updateFields)) {
         sendResponse(false, null, 'No fields to update', 400);
+    }
+    
+    // Try to update the updated_at timestamp when any field changes
+    // Check if column exists first to avoid errors
+    try {
+        $checkColumn = $pdo->query("SHOW COLUMNS FROM transfers LIKE 'updated_at'");
+        if ($checkColumn && $checkColumn->rowCount() > 0) {
+            $updateFields[] = "updated_at = :updated_at_timestamp";
+            $bindParams[':updated_at_timestamp'] = date('Y-m-d H:i:s');
+        } else {
+            error_log("Warning: updated_at column does not exist in transfers table. Run: ALTER TABLE transfers ADD COLUMN updated_at TIMESTAMP NULL DEFAULT NULL;");
+        }
+    } catch (Exception $colEx) {
+        error_log("Warning: Could not check for updated_at column: " . $colEx->getMessage());
     }
     
     // Build and execute UPDATE query

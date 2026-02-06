@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
     Alert,
     Dimensions,
@@ -31,7 +31,7 @@ import {
 
 import { COLORS } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
-import { fetchInvoiceFromCPanel, fetchAllCPanelInvoices } from '../../src/services/cpanelService';
+import { fetchAllCPanelInvoices, fetchInvoiceFromCPanel } from '../../src/services/cpanelService';
 import { getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
@@ -61,6 +61,12 @@ interface InspectionCase {
   createdAt: string;
   updatedAt: string;
   cpanelInvoiceId?: string;
+  includeVAT?: boolean;
+  vatAmount?: number;
+  servicesDiscount?: number;
+  partsDiscount?: number;
+  globalDiscount?: number;
+  assignedMechanic?: string | null;
 }
 
 interface CaseWithDetails extends InspectionCase {
@@ -68,6 +74,40 @@ interface CaseWithDetails extends InspectionCase {
   statusLabel: string;
   source: 'firebase' | 'cpanel';
 }
+
+// Calculate total price with VAT and discounts for a case
+const calculateCaseTotal = (caseItem: CaseWithDetails): number => {
+  // Calculate services subtotal
+  const servicesSubtotal = (caseItem.services || []).reduce((sum, s) => {
+    // Price from CPanel is already total price (unit_rate * count)
+    return sum + (s.price || 0);
+  }, 0);
+  
+  // Calculate parts subtotal
+  const partsSubtotal = (caseItem.parts || []).reduce((sum: number, p: any) => {
+    return sum + (p.totalPrice || (p.unitPrice * (p.quantity || 1)) || 0);
+  }, 0);
+  
+  // Apply services discount
+  const servicesDiscount = (caseItem.servicesDiscount || 0) / 100;
+  const servicesTotal = servicesSubtotal * (1 - servicesDiscount);
+  
+  // Apply parts discount
+  const partsDiscount = (caseItem.partsDiscount || 0) / 100;
+  const partsTotal = partsSubtotal * (1 - partsDiscount);
+  
+  // Subtotal after item discounts
+  const subtotal = servicesTotal + partsTotal;
+  
+  // Apply global discount
+  const globalDiscount = (caseItem.globalDiscount || 0) / 100;
+  const subtotalAfterGlobalDiscount = subtotal * (1 - globalDiscount);
+  
+  // Add VAT if enabled
+  const vatAmount = caseItem.includeVAT ? subtotalAfterGlobalDiscount * 0.18 : 0;
+  
+  return subtotalAfterGlobalDiscount + vatAmount;
+};
 
 export default function CasesScreen() {
   const [cases, setCases] = useState<CaseWithDetails[]>([]);
@@ -79,17 +119,22 @@ export default function CasesScreen() {
   const [filterMenuVisible, setFilterMenuVisible] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'cost_high' | 'cost_low'>('newest');
   const [showSearch, setShowSearch] = useState(false);
-  const [activeTab, setActiveTab] = useState<'firebase' | 'cpanel'>('firebase');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'firebase' | 'cpanel'>('all');
 
   // Filter states
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'today' | 'recent' | 'old'>('all');
   const [priceRangeFilter, setPriceRangeFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
   const [dateRangeFilter, setDateRangeFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
-  const [caseStatusFilter, setCaseStatusFilter] = useState<'all' | 'Pending' | 'In Progress' | 'Completed'>('all');
+  const [caseStatusFilter, setCaseStatusFilter] = useState<'all' | 'Pending' | 'In Progress' | 'In Service' | 'Completed'>('all');
   const [serviceFilterKey, setServiceFilterKey] = useState<string>('all');
   const [repairStatusFilter, setRepairStatusFilter] = useState<string>('all');
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState<string>('all');
+
+  // Scroll position preservation
+  const flatListRef = useRef<FlatList>(null);
+  const scrollOffsetRef = useRef<number>(0);
+  const shouldRestoreScrollRef = useRef<boolean>(false);
 
   const loadCases = async () => {
     try {
@@ -116,6 +161,12 @@ export default function CasesScreen() {
         statusColor: getStatusColor(inspection.createdAt),
         statusLabel: getStatusLabel(inspection.createdAt),
         source: 'firebase' as const,
+        includeVAT: inspection.includeVAT || false,
+        vatAmount: inspection.vatAmount || 0,
+        servicesDiscount: inspection.services_discount_percent || 0,
+        partsDiscount: inspection.parts_discount_percent || 0,
+        globalDiscount: inspection.global_discount_percent || 0,
+        assignedMechanic: inspection.assignedMechanic || null,
       }));
 
       setCases(casesWithDetails);
@@ -154,6 +205,12 @@ export default function CasesScreen() {
           statusColor: getStatusColor(invoice.createdAt),
           statusLabel: getStatusLabel(invoice.createdAt),
           source: 'cpanel' as const,
+          includeVAT: invoice.includeVAT || false,
+          vatAmount: invoice.vatAmount || 0,
+          servicesDiscount: invoice.services_discount_percent || 0,
+          partsDiscount: invoice.parts_discount_percent || 0,
+          globalDiscount: invoice.global_discount_percent || 0,
+          assignedMechanic: invoice.assigned_mechanic || invoice.assignedMechanic || null,
         }));
 
         setCpanelCases(cpanelCasesWithDetails);
@@ -265,7 +322,7 @@ export default function CasesScreen() {
       const publicUrl = `https://portal.otoexpress.ge/public_invoice.php?slug=${slug}`;
 
       await Share.share({
-        message: `📋 ინვოისი: ${item.customerName || 'მომხმარებელი'}\n🚗 ${item.plate || item.carModel || 'ავტომობილი'}\n💰 ჯამი: ${formatCurrencyGEL(item.totalPrice)}\n\n🔗 ლინკი: ${publicUrl}`,
+        message: `📋 ინვოისი: ${item.customerName || 'მომხმარებელი'}\n🚗 ${item.plate || item.carModel || 'ავტომობილი'}\n💰 ჯამი: ${formatCurrencyGEL(calculateCaseTotal(item))}\n\n🔗 ლინკი: ${publicUrl}`,
         url: publicUrl,
         title: `ინვოისი #${item.id.slice(0, 8).toUpperCase()}`,
       });
@@ -308,13 +365,34 @@ export default function CasesScreen() {
     };
   };
 
-  // Load cases when screen comes into focus
+  // Load cases when screen comes into focus and restore scroll position
   useFocusEffect(
     useCallback(() => {
-      loadCases();
-      loadCpanelCases();
+      // Only reload data if not restoring scroll position
+      // This prevents data reload from resetting the list when going back
+      if (!shouldRestoreScrollRef.current) {
+        loadCases();
+        loadCpanelCases();
+      } else {
+        // Restore scroll position after a brief delay
+        setTimeout(() => {
+          if (flatListRef.current && scrollOffsetRef.current > 0) {
+            flatListRef.current.scrollToOffset({
+              offset: scrollOffsetRef.current,
+              animated: false,
+            });
+          }
+          shouldRestoreScrollRef.current = false;
+        }, 50);
+      }
     }, [])
   );
+
+  // Handle navigation to case detail - save scroll position
+  const handleOpenCase = (item: CaseWithDetails) => {
+    shouldRestoreScrollRef.current = true;
+    router.push({ pathname: '/cases/[id]', params: { id: item.id, source: item.source } });
+  };
 
   const getStatusColor = (createdAt: Date): string => {
     const daysSinceCreated = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
@@ -335,16 +413,32 @@ export default function CasesScreen() {
   };
 
   const filterAndSortCases = () => {
-    const sourceCases = activeTab === 'firebase' ? cases : cpanelCases;
-    let filteredCases = sourceCases.filter(caseItem => {
-      // Search filter
-      const searchLower = searchQuery.toLowerCase();
+    // Combine both Firebase and cPanel cases
+    const allCases = [...cases, ...cpanelCases];
+    let filteredCases = allCases.filter(caseItem => {
+      // Source filter
+      if (sourceFilter !== 'all' && caseItem.source !== sourceFilter) return false;
+      // Search filter - search across all relevant fields
+      const searchLower = searchQuery.toLowerCase().trim();
       const matchesSearch = !searchQuery || (
+        (caseItem.id?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.plate?.toLowerCase() || '').includes(searchLower) ||
+        (caseItem.carMake?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.carModel?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.customerName?.toLowerCase() || '').includes(searchLower) ||
         (caseItem.customerPhone?.toLowerCase() || '').includes(searchLower) ||
-        (caseItem.services?.some(s => s.serviceName.toLowerCase().includes(searchLower)) || false)
+        (caseItem.status?.toLowerCase() || '').includes(searchLower) ||
+        (caseItem.repair_status?.toLowerCase() || '').includes(searchLower) ||
+        (caseItem.assignedMechanic?.toLowerCase() || '').includes(searchLower) ||
+        (String(caseItem.cpanelInvoiceId || '').toLowerCase()).includes(searchLower) ||
+        (caseItem.services?.some(s => 
+          (s.serviceName?.toLowerCase() || '').includes(searchLower) ||
+          (s.key?.toLowerCase() || '').includes(searchLower)
+        ) || false) ||
+        (caseItem.parts?.some((p: any) => 
+          (p.name?.toLowerCase() || '').includes(searchLower) ||
+          (p.partName?.toLowerCase() || '').includes(searchLower)
+        ) || false)
       );
 
       // Status filter (based on age)
@@ -356,10 +450,11 @@ export default function CasesScreen() {
       );
 
       // Price range filter
+      const caseTotal = calculateCaseTotal(caseItem);
       const matchesPriceRange = priceRangeFilter === 'all' || (
-        (priceRangeFilter === 'low' && caseItem.totalPrice < 200) ||
-        (priceRangeFilter === 'medium' && caseItem.totalPrice >= 200 && caseItem.totalPrice < 500) ||
-        (priceRangeFilter === 'high' && caseItem.totalPrice >= 500)
+        (priceRangeFilter === 'low' && caseTotal < 200) ||
+        (priceRangeFilter === 'medium' && caseTotal >= 200 && caseTotal < 500) ||
+        (priceRangeFilter === 'high' && caseTotal >= 500)
       );
 
       // Date range filter
@@ -395,9 +490,9 @@ export default function CasesScreen() {
         case 'oldest':
           return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
         case 'cost_high':
-          return b.totalPrice - a.totalPrice;
+          return calculateCaseTotal(b) - calculateCaseTotal(a);
         case 'cost_low':
-          return a.totalPrice - b.totalPrice;
+          return calculateCaseTotal(a) - calculateCaseTotal(b);
         default:
           return 0;
       }
@@ -408,7 +503,7 @@ export default function CasesScreen() {
 
   const renderCaseCard = ({ item }: { item: CaseWithDetails }) => (
     <TouchableOpacity
-      onPress={() => router.push({ pathname: '/cases/[id]', params: { id: item.id, source: item.source } })}
+      onPress={() => handleOpenCase(item)}
       activeOpacity={0.7}
       style={styles.cardTouchable}
     >
@@ -438,7 +533,19 @@ export default function CasesScreen() {
               </View>
             </View>
             <View style={styles.priceContainer}>
-              <Text style={styles.priceValue}>{formatCurrencyGEL(item.totalPrice)}</Text>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceValue}>{formatCurrencyGEL(calculateCaseTotal(item))}</Text>
+                <View style={[
+                  styles.sourceIndicator,
+                  { backgroundColor: item.source === 'firebase' ? '#FEF3C7' : '#DBEAFE' }
+                ]}>
+                  <MaterialCommunityIcons
+                    name={item.source === 'firebase' ? 'firebase' : 'server'}
+                    size={14}
+                    color={item.source === 'firebase' ? '#F59E0B' : '#3B82F6'}
+                  />
+                </View>
+              </View>
               <Chip
                 style={[styles.timeChip, { backgroundColor: item.statusColor + '20' }]}
                 textStyle={[styles.timeChipText, { color: item.statusColor }]}
@@ -457,6 +564,14 @@ export default function CasesScreen() {
               <Text style={styles.statusText}>{item.status}</Text>
             </View>
           </View>
+
+          {/* Assigned Mechanic Row */}
+          {item.assignedMechanic && (
+            <View style={styles.mechanicRow}>
+              <MaterialCommunityIcons name="account-wrench" size={16} color="#6366F1" />
+              <Text style={styles.mechanicText}>{item.assignedMechanic}</Text>
+            </View>
+          )}
 
           {/* Services Row */}
           {item.services && item.services.length > 0 && (
@@ -601,6 +716,7 @@ export default function CasesScreen() {
         all: 'ყველა',
         'Pending': 'მოლოდინში',
         'In Progress': 'მიმდინარე',
+        'In Service': 'სერვისშია',
         'Completed': 'დასრულებული'
       },
       repairStatus: {
@@ -687,7 +803,7 @@ export default function CasesScreen() {
   }
 
   const filteredCases = filterAndSortCases();
-  const totalValue = filteredCases.reduce((sum, item) => sum + item.totalPrice, 0);
+  const totalValue = filteredCases.reduce((sum, item) => sum + calculateCaseTotal(item), 0);
 
   return (
     <View style={styles.container}>
@@ -764,34 +880,42 @@ export default function CasesScreen() {
           />
         )}
 
-        {/* Tab Switcher */}
-        <View style={styles.tabContainer}>
+        {/* Source Filter Chips */}
+        <View style={styles.sourceFilterContainer}>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'firebase' && styles.activeTab]}
-            onPress={() => setActiveTab('firebase')}
+            style={[styles.sourceChip, sourceFilter === 'all' && styles.sourceChipActive]}
+            onPress={() => setSourceFilter('all')}
           >
-            <MaterialCommunityIcons
-              name="firebase"
-              size={18}
-              color={activeTab === 'firebase' ? COLORS.primary : COLORS.text.secondary}
-            />
-            <Text style={[styles.tabText, activeTab === 'firebase' && styles.activeTabText]}>
-              Firebase ({cases.length})
+            <Text style={[styles.sourceChipText, sourceFilter === 'all' && styles.sourceChipTextActive]}>
+              ყველა ({cases.length + cpanelCases.length})
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'cpanel' && styles.activeTab]}
-            onPress={() => setActiveTab('cpanel')}
+            style={[styles.sourceChip, sourceFilter === 'firebase' && styles.sourceChipActive]}
+            onPress={() => setSourceFilter('firebase')}
+          >
+            <MaterialCommunityIcons
+              name="firebase"
+              size={16}
+              color={sourceFilter === 'firebase' ? '#fff' : '#F59E0B'}
+            />
+            <Text style={[styles.sourceChipText, sourceFilter === 'firebase' && styles.sourceChipTextActive]}>
+              {cases.length}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sourceChip, sourceFilter === 'cpanel' && styles.sourceChipActive]}
+            onPress={() => setSourceFilter('cpanel')}
           >
             <MaterialCommunityIcons
               name="server"
-              size={18}
-              color={activeTab === 'cpanel' ? COLORS.primary : COLORS.text.secondary}
+              size={16}
+              color={sourceFilter === 'cpanel' ? '#fff' : '#3B82F6'}
             />
-            <Text style={[styles.tabText, activeTab === 'cpanel' && styles.activeTabText]}>
-              CPanel ({cpanelCases.length})
+            <Text style={[styles.sourceChipText, sourceFilter === 'cpanel' && styles.sourceChipTextActive]}>
+              {cpanelCases.length}
             </Text>
-            {cpanelLoading && <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />}
+            {cpanelLoading && <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 4 }} />}
           </TouchableOpacity>
         </View>
 
@@ -838,11 +962,16 @@ export default function CasesScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={filteredCases}
           renderItem={renderCaseCard}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          onScroll={(event) => {
+            scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -943,7 +1072,7 @@ export default function CasesScreen() {
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>საქმის სტატუსი</Text>
                 <View style={styles.filterChipsRow}>
-                  {(['all', 'Pending', 'In Progress', 'Completed'] as const).map((status) => (
+                  {(['all', 'Pending', 'In Progress', 'In Service', 'Completed'] as const).map((status) => (
                     <Chip
                       key={status}
                       mode={caseStatusFilter === status ? 'flat' : 'outlined'}
@@ -1277,6 +1406,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.3,
   },
+  mechanicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    gap: 8,
+    backgroundColor: '#6366F1' + '15',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  mechanicText: {
+    fontSize: 13,
+    color: '#6366F1',
+    fontWeight: '600',
+  },
   servicesRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1462,5 +1607,47 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     backgroundColor: COLORS.primary,
+  },
+  
+  // Source Filter Chips
+  sourceFilterContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginTop: 12,
+    gap: 8,
+  },
+  sourceChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    gap: 6,
+  },
+  sourceChipActive: {
+    backgroundColor: COLORS.primary,
+  },
+  sourceChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  sourceChipTextActive: {
+    color: '#fff',
+  },
+  
+  // Source Indicator in Card
+  sourceIndicator: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });
