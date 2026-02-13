@@ -151,12 +151,17 @@ export default function ServiceCasesScreen() {
       const inspections = await getAllInspections();
       const serviceStatuses = ['In Service', 'Already in service'];
       const SERVICE_STATUS_ID = 7; // Status ID for "In Service"
+      const completedStatuses = ['Completed', 'completed', 'დასრულებული', 'COMPLETED'];
       const firebaseCases: CaseWithDetails[] = inspections
-        .filter((inspection: any) => 
-          serviceStatuses.includes(inspection.status) || 
-          inspection.status_id === SERVICE_STATUS_ID ||
-          inspection.statusId === SERVICE_STATUS_ID
-        )
+        .filter((inspection: any) => {
+          // Never show completed cases in the service tab
+          if (completedStatuses.includes(inspection.status)) return false;
+          return (
+            serviceStatuses.includes(inspection.status) || 
+            inspection.status_id === SERVICE_STATUS_ID ||
+            inspection.statusId === SERVICE_STATUS_ID
+          );
+        })
         .map((inspection: any) => {
           const daysInService = Math.floor((Date.now() - new Date(inspection.updatedAt || inspection.createdAt).getTime()) / (1000 * 60 * 60 * 24));
           return {
@@ -200,8 +205,11 @@ export default function ServiceCasesScreen() {
           console.log('[Service] CPanel invoices with status_id 7:', statusId7Cases.length);
           console.log('[Service] Sample status_ids:', result.invoices.slice(0, 5).map((i: any) => ({ id: i.cpanelId, status_id: i.status_id, statusId: i.statusId })));
           
+          const completedStatusTexts = ['Completed', 'completed', 'დასრულებული', 'COMPLETED'];
           cpanelServiceCases = result.invoices
             .filter((invoice: any) => {
+              // Never show completed cases in the service tab
+              if (completedStatusTexts.includes(invoice.status)) return false;
               // Parse status_id to handle both string and number values
               const statusId = parseInt(invoice.status_id) || parseInt(invoice.statusId) || 0;
               return statusId === SERVICE_STATUS_ID;
@@ -427,6 +435,7 @@ export default function ServiceCasesScreen() {
             try {
               const updateData = {
                 status: 'Completed',
+                status_id: null,
                 updatedAt: new Date().toISOString(),
               };
 

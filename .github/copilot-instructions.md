@@ -18,19 +18,20 @@ Mobile App ─► Firebase Firestore (primary) ─► cPanel PHP API ─► MySQ
 
 | Service | File | Purpose |
 |---------|------|---------|
-| Firebase | `src/services/firebase.js` | Firestore CRUD, Storage uploads |
-| cPanel Sync | `src/services/cpanelService.js` | MySQL sync, Georgian transforms |
-| Status Cache | `src/services/statusService.ts` | Fetches statuses, 24h AsyncStorage cache |
+| Firebase | `src/services/firebase.js` | Firestore CRUD, Storage uploads (`uploadImage`, `uploadMultipleImages`) |
+| cPanel Sync | `src/services/cpanelService.js` | MySQL sync, Georgian transforms via `getGeorgianServiceName()` |
+| Status Cache | `src/services/statusService.ts` | Fetches statuses from cPanel, 24h AsyncStorage cache |
 
 ### Key Directories
 | Path | Purpose |
 |------|---------|
-| `app/(tabs)/` | Tab screens: index, cases, service, completed, analytics, customers |
+| `app/(tabs)/` | Tab screens: index (Dashboard), cases, service, completed, analytics, customers |
 | `app/cases/[id].tsx` | Dynamic case detail screen |
+| `app/customers/[id].tsx` | Dynamic customer detail screen |
 | `src/config/constants.ts` | `COLORS`, `SPACING`, `TYPOGRAPHY` theme tokens |
-| `src/config/services.ts` | `DEFAULT_SERVICES` with bilingual names |
+| `src/config/services.ts` | `DEFAULT_SERVICES` with bilingual names, `SERVICE_CATEGORIES` |
 | `src/config/georgian.ts` | `GEORGIAN_LABELS` for all UI strings |
-| `src/types/index.ts` | TypeScript interfaces: Customer, Vehicle, Estimate, Invoice, Service |
+| `src/types/index.ts` | TypeScript interfaces: Customer, Vehicle, Estimate, Invoice, Service, DamageItem |
 | `cpanel-files/` | PHP API endpoints → upload to `public_html/api/mobile-sync/` |
 
 ## Critical Patterns
@@ -63,6 +64,7 @@ sendResponse(true, $data);        // Standardized JSON response
 ```typescript
 import { COLORS, SPACING, TYPOGRAPHY } from '@/src/config/constants';
 // COLORS.primary = '#2563EB', COLORS.success = '#10B981', COLORS.error = '#EF4444'
+// COLORS.text.primary, COLORS.text.secondary, COLORS.text.tertiary for text colors
 ```
 
 ### 4. Georgian UI Labels
@@ -72,20 +74,24 @@ import { GEORGIAN_LABELS } from '@/src/config/georgian';
 ```
 
 ### 5. Service Transform (cPanel sync)
-`cpanelService.js` auto-translates service names via `getGeorgianServiceName()` — always use service keys that match `DEFAULT_SERVICES`.
+`cpanelService.js` auto-translates service names via `getGeorgianServiceName()` and `transformServicesToGeorgian()` — always use service keys that match `DEFAULT_SERVICES`.
+
+### 6. Root Layout Providers
+`app/_layout.tsx` wraps app with `PaperProvider` + `ThemeProvider` — no need to add these in child screens.
 
 ## Developer Commands
 ```bash
 npx expo start              # Dev server (Expo Go)
 npx expo start --clear      # Clear Metro cache
 npm run android             # Build + run on Android device/emulator
-npm run lint                # ESLint check
+npm run lint                # ESLint (via expo lint)
 ```
 
 ## Environment Variables (`.env`)
 ```bash
 EXPO_PUBLIC_FIREBASE_API_KEY=...
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=...
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=...
 EXPO_PUBLIC_CPANEL_API_URL=https://domain.com/api/mobile-sync
 EXPO_PUBLIC_CPANEL_API_KEY=...  # MUST match API_KEY in cpanel-files/config.php
 ```
@@ -96,5 +102,7 @@ EXPO_PUBLIC_CPANEL_API_KEY=...  # MUST match API_KEY in cpanel-files/config.php
 3. **PHP files MUST start with** `define('API_ACCESS', true);` before any `require`
 4. **Status type mapping**: App uses `case`/`repair`, API returns `case_status`/`repair_status`
 5. **Path alias `@/`** maps to project root (e.g., `@/src/config/constants`)
-6. **Tab layout** at `app/(tabs)/_layout.tsx` — uses `react-native-paper` + `expo-router`
-7. **Root layout** wraps with `PaperProvider` and `ThemeProvider`
+6. **Tab layout** at `app/(tabs)/_layout.tsx` — uses `MaterialCommunityIcons` from `@expo/vector-icons`
+7. **HapticTab** component at `components/haptic-tab.tsx` for tab buttons with haptic feedback
+8. **Firebase collections**: Use `COLLECTIONS.INSPECTIONS` from `src/services/firebase.js`
+9. **Dynamic routes** use bracket syntax: `app/cases/[id].tsx`, `app/customers/[id].tsx`
