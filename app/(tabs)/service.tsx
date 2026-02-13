@@ -163,7 +163,9 @@ export default function ServiceCasesScreen() {
           );
         })
         .map((inspection: any) => {
-          const daysInService = Math.floor((Date.now() - new Date(inspection.updatedAt || inspection.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+          // Use statusChangedAt (when case entered "In Service") for accurate days count
+          const serviceDate = inspection.statusChangedAt || inspection.status_changed_at || inspection.updatedAt || inspection.createdAt;
+          const daysInService = Math.floor((Date.now() - new Date(serviceDate).getTime()) / (1000 * 60 * 60 * 24));
           return {
             id: inspection.id,
             customerName: inspection.customerName || 'N/A',
@@ -179,8 +181,8 @@ export default function ServiceCasesScreen() {
             createdAt: inspection.createdAt,
             updatedAt: inspection.updatedAt,
             cpanelInvoiceId: inspection.cpanelInvoiceId || '',
-            statusColor: getStatusColor(inspection.createdAt),
-            statusLabel: getStatusLabel(inspection.createdAt),
+            statusColor: getStatusColor(serviceDate),
+            statusLabel: getStatusLabel(serviceDate),
             source: 'firebase' as const,
             includeVAT: inspection.includeVAT || false,
             vatAmount: inspection.vatAmount || 0,
@@ -215,7 +217,9 @@ export default function ServiceCasesScreen() {
               return statusId === SERVICE_STATUS_ID;
             })
             .map((invoice: any) => {
-              const daysInService = Math.floor((Date.now() - new Date(invoice.updatedAt || invoice.createdAt).getTime()) / (1000 * 60 * 60 * 24));
+              // Use statusChangedAt (when case entered "In Service") for accurate days count
+              const serviceDate = invoice.statusChangedAt || invoice.status_changed_at || invoice.updatedAt || invoice.createdAt;
+              const daysInService = Math.floor((Date.now() - new Date(serviceDate).getTime()) / (1000 * 60 * 60 * 24));
               return {
                 id: invoice.cpanelId?.toString() || '',
                 customerName: invoice.customerName || 'N/A',
@@ -231,8 +235,8 @@ export default function ServiceCasesScreen() {
                 createdAt: invoice.createdAt,
                 updatedAt: invoice.updatedAt,
                 cpanelInvoiceId: invoice.cpanelId?.toString() || '',
-                statusColor: getStatusColor(invoice.createdAt),
-                statusLabel: getStatusLabel(invoice.createdAt),
+                statusColor: getStatusColor(serviceDate),
+                statusLabel: getStatusLabel(serviceDate),
                 source: 'cpanel' as const,
                 includeVAT: invoice.includeVAT || false,
                 vatAmount: invoice.vatAmount || 0,
@@ -820,18 +824,11 @@ export default function ServiceCasesScreen() {
         await updateInspection(selectedCase.id, updateData, selectedCase.cpanelInvoiceId || undefined);
       }
 
-      // Update local state
-      setCases(prevCases => 
-        prevCases.map(c => 
-          c.id === selectedCase.id 
-            ? { ...c, repair_status: newStatus }
-            : c
-        )
-      );
-
       setShowRepairStatusModal(false);
       setSelectedCase(null);
       Alert.alert('✅ წარმატება', 'რემონტის სტატუსი განახლდა');
+      // Auto-refresh the list to reflect the update
+      loadServiceCases();
     } catch (error) {
       console.error('Error saving repair status:', error);
       Alert.alert('❌ შეცდომა', 'სტატუსის განახლება ვერ მოხერხდა');
@@ -1108,6 +1105,12 @@ export default function ServiceCasesScreen() {
               <Menu.Item onPress={() => { setStatusFilter('In Service'); setFilterMenuVisible(false); }} title="სერვისშია" />
               <Menu.Item onPress={() => { setStatusFilter('Already in service'); setFilterMenuVisible(false); }} title="უკვე სერვისში" />
             </Menu>
+            <IconButton
+              icon="refresh"
+              size={24}
+              onPress={onRefresh}
+              loading={refreshing}
+            />
           </View>
         </View>
         

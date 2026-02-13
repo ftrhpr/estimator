@@ -406,12 +406,17 @@ export default function CaseDetailScreen() {
       const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
 
       // Send both IDs and legacy string values for backwards compatibility
-      const updateData = {
+      const updateData: any = {
         repair_status: editingRepairStatus,
         status: editingCaseStatus,
         repair_status_id: editingRepairStatusId,
         status_id: editingCaseStatusId,
       };
+
+      // Track when status_id changes so "days in service" is calculated from this moment
+      if (editingCaseStatusId !== caseStatusId) {
+        updateData.statusChangedAt = new Date().toISOString();
+      }
 
       console.log('[Case Detail] Saving workflow statuses:', updateData, 'cpanelId:', cpanelId);
 
