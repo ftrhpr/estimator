@@ -984,10 +984,10 @@ export default function CasesScreen() {
 
       {/* FAB - Bottom right for thumb reach */}
       <FAB
-        icon="camera-plus"
+        icon="plus"
         style={styles.fab}
-        onPress={() => router.push('/capture/QuickCaptureScreen')}
-        label="ახალი"
+        onPress={() => router.push('/cases/create')}
+        label="ახალი საქმე"
         color="#fff"
       />
 

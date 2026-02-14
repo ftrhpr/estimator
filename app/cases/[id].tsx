@@ -150,6 +150,14 @@ export default function CaseDetailScreen() {
   const [caseType, setCaseType] = useState<string | null>(null);
   const [showCaseTypeModal, setShowCaseTypeModal] = useState(false);
 
+  // Insurance fields (visible when caseType = 'დაზღვევა')
+  const [insuranceCompany, setInsuranceCompany] = useState<string>('');
+  const [claimNumber, setClaimNumber] = useState<string>('');
+  const [adjusterName, setAdjusterName] = useState<string>('');
+  const [adjusterPhone, setAdjusterPhone] = useState<string>('');
+  const [showInsuranceModal, setShowInsuranceModal] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+
   // Assigned mechanic state
   const [assignedMechanic, setAssignedMechanic] = useState<string | null>(null);
   const [showMechanicModal, setShowMechanicModal] = useState(false);
@@ -2035,6 +2043,77 @@ export default function CaseDetailScreen() {
     }
   };
 
+  // ─── Invoice PDF Generation ───────────────────────────────────────
+  const handleGenerateInvoicePdf = async () => {
+    if (!caseData) return;
+    setGeneratingPdf(true);
+    try {
+      const pdfData = {
+        caseId: (id as string) || '',
+        caseType,
+        createdAt: caseData.createdAt || caseData.serviceDate || null,
+        customerName: caseData.customerName || '',
+        customerPhone: caseData.customerPhone || '',
+        carMake: caseData.carMake || caseData.vehicleMake || '',
+        carModel: caseData.carModel || caseData.vehicleModel || '',
+        plate: caseData.plate || '',
+        services: caseData.services || [],
+        parts: caseParts || [],
+        servicesDiscount: parseFloat(servicesDiscount) || 0,
+        partsDiscount: parseFloat(partsDiscount) || 0,
+        globalDiscount: parseFloat(globalDiscount) || 0,
+        includeVAT,
+        vatAmount: getVATAmount(),
+        vatRate: includeVAT ? 18 : 0,
+        totalPrice: getGrandTotal(),
+        payments,
+        totalPaid,
+        insuranceCompany: insuranceCompany || null,
+        claimNumber: claimNumber || null,
+        adjusterName: adjusterName || null,
+        adjusterPhone: adjusterPhone || null,
+        assignedMechanic,
+      };
+      await shareInvoicePdf(pdfData);
+    } catch (error) {
+      console.error('Error generating invoice PDF:', error);
+      Alert.alert('❌ შეცდომა', 'ინვოისის PDF-ის გენერაცია ვერ მოხერხდა');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  // ─── Insurance Fields Save ────────────────────────────────────────
+  const handleSaveInsuranceInfo = async () => {
+    try {
+      const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
+
+      const updateData = {
+        insuranceCompany: insuranceCompany.trim(),
+        claimNumber: claimNumber.trim(),
+        adjusterName: adjusterName.trim(),
+        adjusterPhone: adjusterPhone.trim(),
+      };
+
+      if (cpanelId) {
+        const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+        await updateInvoiceToCPanel(cpanelId, updateData);
+      }
+
+      if (!isCpanelOnly) {
+        const { updateInspection } = require('../../src/services/firebase');
+        await updateInspection(id as string, updateData, cpanelId || undefined);
+      }
+
+      setCaseData({ ...caseData, ...updateData });
+      setShowInsuranceModal(false);
+      Alert.alert('✅', 'სადაზღვევო ინფორმაცია შენახულია');
+    } catch (error) {
+      console.error('Error saving insurance info:', error);
+      Alert.alert('❌ შეცდომა', 'შენახვა ვერ მოხერხდა');
+    }
+  };
+
   const handleWhatsAppShare = async () => {
     if (!caseData) return;
 
@@ -2692,8 +2771,13 @@ export default function CaseDetailScreen() {
         const existingPhotos = caseData.photos || [];
         const updatedPhotos = [...existingPhotos, ...uploadedPhotos];
 
-        // 5. Update inspection document in Firestore (only if not cPanel-only)
-        if (!isCpanelOnly) {
+        // 5. Persist photos
+        if (isCpanelOnly) {
+          // For cPanel-only cases, sync photo URLs to cPanel MySQL
+          const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+          await updateInvoiceToCPanel(id as string, { photos: updatedPhotos });
+        } else {
+          // For Firebase cases, update Firestore (and cPanel via updateInspection)
           const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
           await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
         }
@@ -2744,8 +2828,13 @@ export default function CaseDetailScreen() {
         const existingPhotos = caseData.photos || [];
         const updatedPhotos = [...existingPhotos, ...uploadedPhotos];
 
-        // 5. Update inspection document in Firestore (only if not cPanel-only)
-        if (!isCpanelOnly) {
+        // 5. Persist photos
+        if (isCpanelOnly) {
+          // For cPanel-only cases, sync photo URLs to cPanel MySQL
+          const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+          await updateInvoiceToCPanel(id as string, { photos: updatedPhotos });
+        } else {
+          // For Firebase cases, update Firestore (and cPanel via updateInspection)
           const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
           await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
         }
@@ -2779,8 +2868,13 @@ export default function CaseDetailScreen() {
               // Remove the photo from the array
               const updatedPhotos = caseData.photos.filter((_: any, index: number) => index !== photoIndex);
 
-              // Update inspection document in Firestore (only if not cPanel-only)
-              if (!isCpanelOnly) {
+              // Persist the change
+              if (isCpanelOnly) {
+                // For cPanel-only cases, sync to cPanel MySQL
+                const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
+                await updateInvoiceToCPanel(id as string, { photos: updatedPhotos });
+              } else {
+                // For Firebase cases, update Firestore (and cPanel via updateInspection)
                 const cpanelId = cpanelInvoiceId || (await getCPanelInvoiceId());
                 await updateInspection(id as string, { photos: updatedPhotos }, cpanelId || undefined);
               }

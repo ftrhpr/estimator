@@ -3,9 +3,9 @@
 export const APP_CONFIG = {
   name: 'AutoBody Estimator',
   version: '1.0.0',
-  defaultTaxRate: 0.08, // 8% default tax rate
-  currency: 'USD',
-  currencySymbol: '$',
+  defaultTaxRate: 0.18, // 18% Georgian VAT
+  currency: 'GEL',
+  currencySymbol: '₾',
 };
 
 export const LABOR_RATES = {

@@ -3,13 +3,18 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useNavigation } from 'expo-router';
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
     Alert,
+    Animated,
     Dimensions,
     FlatList,
     Image,
+    Platform,
+    ScrollView,
+    StatusBar,
     StyleSheet,
     TouchableOpacity,
     Vibration,
@@ -17,18 +22,15 @@ import {
 } from 'react-native';
 import {
     ActivityIndicator,
-    Appbar,
-    Button,
-    Chip,
-    IconButton,
     Modal,
     Portal,
     Text
 } from 'react-native-paper';
 
-import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
+import { BORDER_RADIUS, COLORS, SHADOWS, SPACING } from '../../src/config/constants';
 
 const { width, height } = Dimensions.get('window');
+const STATUSBAR_HEIGHT = Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44;
 
 interface CapturedPhoto {
   id: string;
@@ -40,16 +42,16 @@ interface CapturedPhoto {
 }
 
 const QUICK_ANGLES = [
-  { key: 'Front', icon: 'car', label: 'Front' },
-  { key: 'Right Side', icon: 'car-side', label: 'Right Side' },
-  { key: 'Rear', icon: 'car', label: 'Rear' },
-  { key: 'Left Side', icon: 'car-side', label: 'Left Side' },
-  { key: 'Damage Detail', icon: 'magnify-plus-outline', label: 'Damage Detail' },
+  { key: 'Front', icon: 'car-outline', label: 'წინა', emoji: '🚗' },
+  { key: 'Right Side', icon: 'car-side', label: 'მარჯვენა', emoji: '➡️' },
+  { key: 'Rear', icon: 'car-back', label: 'უკანა', emoji: '🔙' },
+  { key: 'Left Side', icon: 'car-side', label: 'მარცხენა', emoji: '⬅️' },
+  { key: 'Damage Detail', icon: 'magnify-plus-outline', label: 'დაზიანება', emoji: '🔍' },
 ];
 
 const DAMAGE_INDEX = 4; // Index of "Damage Detail"
 
-export const options = () => ({ title: 'Quick Capture' });
+export const options = () => ({ title: 'სწრაფი გადაღება', headerShown: false });
 
 export default function QuickCaptureScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -62,8 +64,19 @@ export default function QuickCaptureScreen() {
   const [showPreview, setShowPreview] = useState(false);
   const [facing, setFacing] = useState<CameraType>('back');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [flashAnim] = useState(new Animated.Value(0));
 
   const cameraRef = useRef<CameraView>(null);
+
+  // Flash animation on capture
+  const triggerFlash = () => {
+    flashAnim.setValue(1);
+    Animated.timing(flashAnim, {
+      toValue: 0,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  };
 
   // Request permissions on focus
   useFocusEffect(
@@ -89,10 +102,8 @@ export default function QuickCaptureScreen() {
 
   const navigation = useNavigation();
   useLayoutEffect(() => {
-    const angleLabel = currentAngle || 'Quick Capture';
-    const photosLabel = photos?.length ? ` (${photos.length})` : '';
-    navigation.setOptions({ title: `${angleLabel}${photosLabel}` });
-  }, [currentAngle, photos, navigation]);
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   const handlePickFromGallery = async () => {
     try {
@@ -102,8 +113,8 @@ export default function QuickCaptureScreen() {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(
-          'Permission Required',
-          'Please allow access to your photo library to select photos.',
+          'ნებართვა საჭიროა',
+          'გთხოვთ მიეცით გალერეაზე წვდომა ფოტოების ასარჩევად.',
           [{ text: 'OK' }]
         );
         return;
@@ -146,7 +157,7 @@ export default function QuickCaptureScreen() {
       }
     } catch (error) {
       console.error('Error picking photo:', error);
-      Alert.alert('Error', 'Failed to select photo from gallery');
+      Alert.alert('შეცდომა', 'ვერ მოხერხდა ფოტოს არჩევა გალერეადან');
     } finally {
       setIsCapturing(false);
     }
@@ -157,7 +168,8 @@ export default function QuickCaptureScreen() {
 
     try {
       setIsCapturing(true);
-      Vibration.vibrate(50); // Haptic feedback
+      Vibration.vibrate(50);
+      triggerFlash();
       
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
@@ -190,7 +202,7 @@ export default function QuickCaptureScreen() {
       }
     } catch (error) {
       console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to capture photo');
+      Alert.alert('შეცდომა', 'ფოტოს გადაღება ვერ მოხერხდა');
     } finally {
       setIsCapturing(false);
     }
@@ -291,9 +303,9 @@ export default function QuickCaptureScreen() {
   const handleDone = () => {
     if (photos.length === 0) {
       Alert.alert(
-        'No Photos',
-        'Please capture at least one photo before continuing.',
-        [{ text: 'OK' }]
+        'ფოტო არ არის',
+        'გთხოვთ გადაიღოთ მინიმუმ ერთი ფოტო.',
+        [{ text: 'კარგი' }]
       );
       return;
     }
@@ -313,42 +325,60 @@ export default function QuickCaptureScreen() {
   };
 
   const renderPhotoPreview = ({ item }: { item: CapturedPhoto }) => (
-    <View style={styles.photoPreview}>
+    <View style={styles.photoPreviewCard}>
       <Image source={{ uri: item.uri }} style={styles.previewImage} />
-      <View style={styles.photoOverlay}>
-        <Chip
-          mode="flat"
-          textStyle={styles.angleChipText}
-          style={styles.angleChip}
-        >
-          {item.label || item.angle}
-        </Chip>
-        <View style={styles.photoActions}>
-          {item.voiceNote && (
-            <IconButton
-              icon="microphone"
-              size={16}
-              iconColor={COLORS.success}
-              style={styles.voiceIndicator}
-            />
-          )}
-          <IconButton
-            icon="delete"
-            size={16}
-            iconColor={COLORS.error}
-            style={styles.deleteButton}
-            onPress={() => deletePhoto(item.id)}
-          />
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.7)']}
+        style={styles.previewOverlayGradient}
+      >
+        <View style={styles.previewCardInfo}>
+          <View style={styles.previewAngleBadge}>
+            <Text style={styles.previewAngleText}>{item.label || item.angle}</Text>
+          </View>
+          <View style={styles.previewCardActions}>
+            {item.voiceNote && (
+              <View style={styles.voiceIndicator}>
+                <MaterialCommunityIcons name="microphone" size={14} color={COLORS.success} />
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => deletePhoto(item.id)}
+            >
+              <MaterialCommunityIcons name="trash-can-outline" size={16} color={COLORS.error} />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </LinearGradient>
     </View>
   );
+
+  // ── Photo thumbnail strip item ──
+  const renderThumbnail = ({ item, index }: { item: CapturedPhoto; index: number }) => (
+    <TouchableOpacity
+      style={styles.thumbnailWrap}
+      onPress={() => setShowPreview(true)}
+    >
+      <Image source={{ uri: item.uri }} style={styles.thumbnailImage} />
+      <View style={styles.thumbnailBadge}>
+        <Text style={styles.thumbnailBadgeText}>{index + 1}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // ── Get completion percentage ──
+  const standardAnglesCompleted = QUICK_ANGLES
+    .slice(0, DAMAGE_INDEX)
+    .filter(a => photos.some(p => p.angle === a.key)).length;
+  const completionPct = Math.round((standardAnglesCompleted / DAMAGE_INDEX) * 100);
 
   if (!permission) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading camera...</Text>
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>კამერის ჩატვირთვა...</Text>
+        </View>
       </View>
     );
   }
@@ -356,213 +386,273 @@ export default function QuickCaptureScreen() {
   if (!permission.granted) {
     return (
       <View style={styles.permissionContainer}>
-        <MaterialCommunityIcons 
-          name="camera-off" 
-          size={64} 
-          color={COLORS.text.tertiary} 
-        />
-        <Text style={styles.permissionTitle}>Camera Access Needed</Text>
-        <Text style={styles.permissionText}>
-          This app needs camera access to capture damage photos
-        </Text>
-        <Button
-          mode="contained"
-          onPress={requestPermission}
-          style={styles.permissionButton}
-        >
-          Grant Camera Access
-        </Button>
+        <View style={styles.permissionCard}>
+          <LinearGradient
+            colors={[COLORS.primary + '12', COLORS.primary + '04']}
+            style={styles.permissionIconCircle}
+          >
+            <MaterialCommunityIcons 
+              name="camera-off" 
+              size={56} 
+              color={COLORS.primary} 
+            />
+          </LinearGradient>
+          <Text style={styles.permissionTitle}>კამერაზე წვდომა საჭიროა</Text>
+          <Text style={styles.permissionText}>
+            აპლიკაციას ესაჭიროება კამერაზე წვდომა დაზიანების ფოტოების გადასაღებად
+          </Text>
+          <TouchableOpacity
+            style={styles.permissionButton}
+            onPress={requestPermission}
+          >
+            <LinearGradient
+              colors={[COLORS.primary, COLORS.primaryDark]}
+              style={styles.permissionBtnGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <MaterialCommunityIcons name="camera" size={20} color="#FFF" />
+              <Text style={styles.permissionBtnText}>კამერაზე წვდომის მიცემა</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <Appbar.Header style={styles.header}>
-        <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Quick Capture" titleStyle={styles.headerTitle} />
-        <Appbar.Action 
-          icon="image-multiple" 
-          onPress={() => setShowPreview(true)} 
-        />
-        <Appbar.Action 
-          icon="camera-flip" 
-          onPress={() => setFacing(facing === 'back' ? 'front' : 'back')} 
-        />
-      </Appbar.Header>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* Camera View */}
-      <View style={styles.cameraContainer}>
-        <CameraView
-          ref={cameraRef}
-          style={styles.camera}
-          facing={facing}
+      {/* Camera View — Full Screen */}
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={facing}
+      >
+        {/* Flash Overlay */}
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.flashOverlay, { opacity: flashAnim }]}
+        />
+
+        {/* Top Safe Area + Header */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.55)', 'transparent']}
+          style={styles.topGradient}
         >
-          {/* Angle Selection */}
-          <View style={styles.angleSelector}>
-            {QUICK_ANGLES.map((angle, index) => (
-              <TouchableOpacity
-                key={angle.key}
-                style={[
-                  styles.angleButton,
-                  currentAngle === angle.key && styles.angleButtonActive
-                ]}
-                onPress={() => selectAngle(angle.key, index)}
-              >
-                <MaterialCommunityIcons
-                  name={angle.icon as any}
-                  size={20}
-                  color={currentAngle === angle.key ? COLORS.text.onPrimary : COLORS.text.primary}
-                />
-                <Text
-                  style={[
-                    styles.angleButtonText,
-                    currentAngle === angle.key && styles.angleButtonTextActive
-                  ]}
-                >
-                  {angle.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <View style={styles.headerRow}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
+              <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
+            </TouchableOpacity>
 
-          {/* Progress Indicator */}
-          <View style={styles.progressIndicator}>
-            <View style={styles.progressBox}>
-              <Text style={styles.progressText}>
-                {currentAngleIndex + 1} / {QUICK_ANGLES.length}
-              </Text>
-              {currentAngleIndex === DAMAGE_INDEX && damagePhotoCount > 0 && (
-                <Text style={styles.damageCountText}>
-                  {damagePhotoCount} damage photo{damagePhotoCount !== 1 ? 's' : ''}
-                </Text>
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerTitle}>📸 სწრაფი გადაღება</Text>
+              {photos.length > 0 && (
+                <View style={styles.headerCountBadge}>
+                  <Text style={styles.headerCountText}>{photos.length}</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.headerRightGroup}>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+              >
+                <MaterialCommunityIcons name="camera-flip-outline" size={22} color="#FFF" />
+              </TouchableOpacity>
+              {photos.length > 0 && (
+                <TouchableOpacity
+                  style={styles.headerBtn}
+                  onPress={() => setShowPreview(true)}
+                >
+                  <MaterialCommunityIcons name="image-multiple-outline" size={22} color="#FFF" />
+                </TouchableOpacity>
               )}
             </View>
           </View>
+        </LinearGradient>
 
-          {/* Navigation Controls */}
-          <View style={styles.navigationControls}>
+        {/* Angle Selector Strip — below header */}
+        <View style={styles.angleSelectorWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.angleSelectorScroll}>
+            {QUICK_ANGLES.map((angle, index) => {
+              const isActive = currentAngleIndex === index;
+              const hasPhoto = photos.some(p => p.angle === angle.key);
+              return (
+                <TouchableOpacity
+                  key={angle.key}
+                  style={[
+                    styles.angleCard,
+                    isActive && styles.angleCardActive,
+                    hasPhoto && !isActive && styles.angleCardDone,
+                  ]}
+                  onPress={() => selectAngle(angle.key, index)}
+                  activeOpacity={0.7}
+                >
+                  <MaterialCommunityIcons
+                    name={angle.icon as any}
+                    size={18}
+                    color={isActive ? '#FFF' : hasPhoto ? COLORS.success : 'rgba(255,255,255,0.7)'}
+                  />
+                  <Text style={[
+                    styles.angleCardText,
+                    isActive && styles.angleCardTextActive,
+                    hasPhoto && !isActive && styles.angleCardTextDone,
+                  ]}>
+                    {angle.label}
+                  </Text>
+                  {hasPhoto && !isActive && (
+                    <View style={styles.angleCheckmark}>
+                      <MaterialCommunityIcons name="check" size={10} color="#FFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Center — Progress + Navigation */}
+        <View style={styles.centerOverlay}>
+          {/* Progress Pill */}
+          <View style={styles.progressPill}>
+            <Text style={styles.progressPillText}>
+              {currentAngleIndex + 1}/{QUICK_ANGLES.length}
+            </Text>
+            <View style={styles.progressBarWrap}>
+              <View style={[styles.progressBarFill, { width: `${completionPct}%` }]} />
+            </View>
+            {currentAngleIndex === DAMAGE_INDEX && damagePhotoCount > 0 && (
+              <Text style={styles.damagePillText}>
+                🔍 {damagePhotoCount} დაზიანების ფოტო
+              </Text>
+            )}
+          </View>
+
+          {/* Navigation Arrows */}
+          <View style={styles.navigationRow}>
             {currentAngleIndex > 0 && (
-              <TouchableOpacity
-                style={styles.navButton}
-                onPress={goToPreviousAngle}
-              >
-                <MaterialCommunityIcons name="chevron-left" size={20} color="white" />
-                <Text style={styles.navButtonText}>Previous</Text>
+              <TouchableOpacity style={styles.navArrow} onPress={goToPreviousAngle}>
+                <MaterialCommunityIcons name="chevron-left" size={22} color="#FFF" />
+                <Text style={styles.navArrowText}>წინა</Text>
               </TouchableOpacity>
             )}
-            
+
+            <View style={{ flex: 1 }} />
+
             {currentAngleIndex < QUICK_ANGLES.length - 1 && (
               <TouchableOpacity
-                style={[styles.navButton, styles.navButtonNext]}
+                style={[styles.navArrow, styles.navArrowNext]}
                 onPress={goToNextAngle}
               >
-                <Text style={styles.navButtonText}>
-                  {currentAngleIndex === DAMAGE_INDEX - 1 ? 'Start Damage' : 'Skip'}
+                <Text style={styles.navArrowText}>
+                  {currentAngleIndex === DAMAGE_INDEX - 1 ? 'დაზიანება' : 'გამოტოვება'}
                 </Text>
-                <MaterialCommunityIcons name="chevron-right" size={20} color="white" />
-              </TouchableOpacity>
-            )}
-
-            {currentAngleIndex === DAMAGE_INDEX && damagePhotoCount > 0 && (
-              <TouchableOpacity
-                style={[styles.navButton, styles.navButtonDone]}
-                onPress={() => {
-                  setCurrentAngleIndex(QUICK_ANGLES.length);
-                  Alert.alert('Damage Photos Complete', 'You can now review all photos or continue capturing.');
-                }}
-              >
-                <MaterialCommunityIcons name="check" size={20} color="white" />
-                <Text style={styles.navButtonText}>Done with Damage</Text>
+                <MaterialCommunityIcons name="chevron-right" size={22} color="#FFF" />
               </TouchableOpacity>
             )}
           </View>
+        </View>
 
-          {/* Photo count indicator */}
-          <View style={styles.photoCounter}>
-            <Text style={styles.photoCountText}>
-              {photos.length} photo{photos.length !== 1 ? 's' : ''}
-            </Text>
-          </View>
-        </CameraView>
-      </View>
-
-      {/* Camera Controls */}
-      <View style={styles.controls}>
-        {/* Voice Note Button */}
-        <TouchableOpacity
-          style={[styles.voiceButton, isRecording && styles.voiceButtonActive]}
-          onPress={handleVoiceRecording}
-          activeOpacity={0.8}
+        {/* Bottom Gradient Overlay */}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.65)']}
+          style={styles.bottomGradient}
         >
-          <MaterialCommunityIcons
-            name={isRecording ? "microphone" : "microphone-outline"}
-            size={24}
-            color={isRecording ? COLORS.error : COLORS.text.secondary}
-          />
-          <Text style={[styles.voiceButtonText, isRecording && styles.voiceButtonTextActive]}>
-            {isRecording ? 'Stop Note' : 'Voice Note'}
-          </Text>
-        </TouchableOpacity>
+          {/* Photo Thumbnail Strip */}
+          {photos.length > 0 && (
+            <FlatList
+              data={photos}
+              renderItem={renderThumbnail}
+              keyExtractor={item => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.thumbnailStrip}
+              style={styles.thumbnailStripWrap}
+            />
+          )}
 
-        {/* Gallery Picker Button */}
-        <TouchableOpacity
-          style={[styles.galleryButton, isCapturing && styles.galleryButtonDisabled]}
-          onPress={handlePickFromGallery}
-          disabled={isCapturing}
-          activeOpacity={0.8}
-        >
-          <MaterialCommunityIcons
-            name="image-multiple"
-            size={24}
-            color={COLORS.text.secondary}
-          />
-          <Text style={styles.galleryButtonText}>
-            Gallery
-          </Text>
-        </TouchableOpacity>
-
-        {/* Capture Button */}
-        <TouchableOpacity
-          style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
-          onPress={handleTakePhoto}
-          disabled={isCapturing}
-          activeOpacity={0.8}
-        >
-          <View style={styles.captureButtonInner}>
-            {isCapturing ? (
-              <ActivityIndicator size="small" color={COLORS.text.onPrimary} />
-            ) : (
+          {/* Controls Row */}
+          <View style={styles.controlsRow}>
+            {/* Voice */}
+            <TouchableOpacity
+              style={[styles.controlBtn, isRecording && styles.controlBtnRecording]}
+              onPress={handleVoiceRecording}
+              activeOpacity={0.7}
+            >
               <MaterialCommunityIcons
-                name="camera"
-                size={32}
-                color={COLORS.text.onPrimary}
+                name={isRecording ? 'microphone' : 'microphone-outline'}
+                size={22}
+                color={isRecording ? COLORS.error : '#FFF'}
               />
-            )}
-          </View>
-        </TouchableOpacity>
+              <Text style={[styles.controlBtnLabel, isRecording && { color: COLORS.error }]}>
+                {isRecording ? 'შეწყვეტა' : 'ხმოვანი'}
+              </Text>
+            </TouchableOpacity>
 
-        {/* Done Button */}
-        <TouchableOpacity
-          style={[styles.doneButton, photos.length === 0 && styles.doneButtonDisabled]}
-          onPress={handleDone}
-          disabled={photos.length === 0}
-          activeOpacity={0.8}
-        >
-          <MaterialCommunityIcons
-            name="check"
-            size={24}
-            color={photos.length > 0 ? COLORS.success : COLORS.text.disabled}
-          />
-          <Text style={[
-            styles.doneButtonText,
-            photos.length === 0 && styles.doneButtonTextDisabled
-          ]}>
-            Done
-          </Text>
-        </TouchableOpacity>
-      </View>
+            {/* Gallery */}
+            <TouchableOpacity
+              style={[styles.controlBtn, isCapturing && { opacity: 0.4 }]}
+              onPress={handlePickFromGallery}
+              disabled={isCapturing}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="image-outline" size={22} color="#FFF" />
+              <Text style={styles.controlBtnLabel}>გალერეა</Text>
+            </TouchableOpacity>
+
+            {/* Capture Button — Central */}
+            <TouchableOpacity
+              style={styles.captureOuter}
+              onPress={handleTakePhoto}
+              disabled={isCapturing}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.captureRing, isCapturing && { borderColor: COLORS.text.disabled }]}>
+                {isCapturing ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <View style={styles.captureInner} />
+                )}
+              </View>
+            </TouchableOpacity>
+
+            {/* Done */}
+            <TouchableOpacity
+              style={[styles.controlBtn, photos.length === 0 && { opacity: 0.3 }]}
+              onPress={handleDone}
+              disabled={photos.length === 0}
+              activeOpacity={0.7}
+            >
+              <View style={[
+                styles.doneIconCircle,
+                photos.length > 0 && styles.doneIconCircleActive,
+              ]}>
+                <MaterialCommunityIcons
+                  name="check"
+                  size={18}
+                  color={photos.length > 0 ? '#FFF' : 'rgba(255,255,255,0.5)'}
+                />
+              </View>
+              <Text style={[styles.controlBtnLabel, photos.length > 0 && { color: COLORS.success }]}>
+                მზადაა
+              </Text>
+            </TouchableOpacity>
+
+            {/* Flip (extra small) */}
+            <TouchableOpacity
+              style={styles.controlBtn}
+              onPress={() => setFacing(facing === 'back' ? 'front' : 'back')}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="camera-flip-outline" size={20} color="rgba(255,255,255,0.7)" />
+              <Text style={[styles.controlBtnLabel, { color: 'rgba(255,255,255,0.5)' }]}>შეცვლა</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </CameraView>
 
       {/* Photo Preview Modal */}
       <Portal>
@@ -571,14 +661,18 @@ export default function QuickCaptureScreen() {
           onDismiss={() => setShowPreview(false)}
           contentContainerStyle={styles.previewModal}
         >
+          {/* Modal Header */}
           <View style={styles.previewHeader}>
-            <Text variant="titleLarge" style={styles.previewTitle}>
-              Captured Photos ({photos.length})
-            </Text>
-            <IconButton
-              icon="close"
-              onPress={() => setShowPreview(false)}
-            />
+            <View style={styles.previewHeaderLeft}>
+              <MaterialCommunityIcons name="image-multiple" size={22} color={COLORS.primary} />
+              <Text style={styles.previewTitle}>გადაღებული ფოტოები</Text>
+              <View style={styles.previewCountBadge}>
+                <Text style={styles.previewCountText}>{photos.length}</Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={() => setShowPreview(false)} style={styles.previewCloseBtn}>
+              <MaterialCommunityIcons name="close" size={22} color={COLORS.text.secondary} />
+            </TouchableOpacity>
           </View>
           
           {photos.length > 0 ? (
@@ -588,27 +682,37 @@ export default function QuickCaptureScreen() {
               keyExtractor={(item) => item.id}
               numColumns={2}
               contentContainerStyle={styles.previewGrid}
+              columnWrapperStyle={styles.previewGridRow}
             />
           ) : (
             <View style={styles.emptyPreview}>
               <MaterialCommunityIcons
-                name="camera-outline"
-                size={48}
-                color={COLORS.text.tertiary}
+                name="camera-plus-outline"
+                size={56}
+                color={COLORS.text.disabled}
               />
               <Text style={styles.emptyPreviewText}>
-                No photos captured yet
+                ფოტოები ჯერ არ არის გადაღებული
               </Text>
             </View>
           )}
           
-          <Button
-            mode="contained"
-            onPress={() => setShowPreview(false)}
-            style={styles.previewCloseButton}
-          >
-            Continue Capturing
-          </Button>
+          <View style={styles.previewFooter}>
+            <TouchableOpacity
+              onPress={() => setShowPreview(false)}
+              style={styles.previewContinueBtn}
+            >
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.primaryDark]}
+                style={styles.previewContinueGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <MaterialCommunityIcons name="camera" size={18} color="#FFF" />
+                <Text style={styles.previewContinueText}>გადაღების გაგრძელება</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </Modal>
       </Portal>
     </View>
@@ -618,305 +722,497 @@ export default function QuickCaptureScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  header: {
-    backgroundColor: COLORS.surface,
-    elevation: 2,
-  },
-  headerTitle: {
-    ...TYPOGRAPHY.h2,
-    color: COLORS.text.primary,
-  },
-  cameraContainer: {
-    flex: 1,
-    position: 'relative',
+    backgroundColor: '#000',
   },
   camera: {
     flex: 1,
   },
-  angleSelector: {
-    position: 'absolute',
-    top: SPACING.lg,
-    left: SPACING.md,
-    right: SPACING.md,
+
+  // ── Flash Overlay ──
+  flashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#FFF',
+    zIndex: 999,
+  },
+
+  // ── Top Gradient + Header ──
+  topGradient: {
+    paddingTop: STATUSBAR_HEIGHT + 4,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  headerRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
-  angleButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.md,
+  headerBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
     alignItems: 'center',
-    minWidth: 60,
   },
-  angleButtonActive: {
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+    letterSpacing: 0.3,
+  },
+  headerCountBadge: {
     backgroundColor: COLORS.primary,
-  },
-  angleButtonText: {
-    fontSize: 10,
-    color: COLORS.text.primary,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  angleButtonTextActive: {
-    color: COLORS.text.onPrimary,
-  },
-  progressIndicator: {
-    position: 'absolute',
-    top: SPACING.xl * 3,
-    alignSelf: 'center',
-  },
-  progressBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  progressText: {
-    color: COLORS.text.onPrimary,
-    fontSize: 14,
-    fontWeight: '600',
+  headerCountText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFF',
   },
-  damageCountText: {
-    color: 'rgba(255, 255, 255, 0.9)',
+  headerRightGroup: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+
+  // ── Angle Selector ──
+  angleSelectorWrap: {
+    position: 'absolute',
+    top: STATUSBAR_HEIGHT + 52,
+    left: 0,
+    right: 0,
+  },
+  angleSelectorScroll: {
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  angleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  angleCardActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  angleCardDone: {
+    borderColor: COLORS.success + '60',
+    backgroundColor: 'rgba(16,185,129,0.2)',
+  },
+  angleCardText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  angleCardTextActive: {
+    color: '#FFF',
+  },
+  angleCardTextDone: {
+    color: COLORS.success,
+  },
+  angleCheckmark: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.success,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 2,
+  },
+
+  // ── Center Overlay ──
+  centerOverlay: {
+    position: 'absolute',
+    top: STATUSBAR_HEIGHT + 100,
+    left: 12,
+    right: 12,
+    alignItems: 'center',
+    gap: 12,
+  },
+  progressPill: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    alignItems: 'center',
+    minWidth: 100,
+  },
+  progressPillText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  progressBarWrap: {
+    width: 80,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 2,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: COLORS.success,
+    borderRadius: 2,
+  },
+  damagePillText: {
+    color: 'rgba(255,255,255,0.8)',
     fontSize: 11,
     marginTop: 4,
-    fontStyle: 'italic',
   },
-  navigationControls: {
-    position: 'absolute',
-    top: SPACING.xl * 4.5,
-    left: SPACING.md,
-    right: SPACING.md,
+  navigationRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: SPACING.sm,
+    width: '100%',
+    alignItems: 'center',
   },
-  navButton: {
+  navArrow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(107, 114, 128, 0.85)',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
-    gap: 4,
+    gap: 2,
+    backgroundColor: 'rgba(107,114,128,0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
-  navButtonNext: {
-    backgroundColor: 'rgba(37, 99, 235, 0.85)',
+  navArrowNext: {
+    backgroundColor: 'rgba(37,99,235,0.7)',
   },
-  navButtonDone: {
-    backgroundColor: 'rgba(16, 185, 129, 0.85)',
-  },
-  navButtonText: {
-    color: COLORS.text.onPrimary,
+  navArrowText: {
+    color: '#FFF',
     fontSize: 12,
     fontWeight: '600',
   },
-  photoCounter: {
+
+  // ── Bottom Gradient ──
+  bottomGradient: {
     position: 'absolute',
-    top: SPACING.lg,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.lg,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    paddingTop: 30,
   },
-  photoCountText: {
-    color: COLORS.text.onPrimary,
-    fontSize: 12,
-    fontWeight: '500',
+
+  // ── Thumbnail Strip ──
+  thumbnailStripWrap: {
+    marginBottom: 12,
   },
-  controls: {
+  thumbnailStrip: {
+    paddingHorizontal: 12,
+    gap: 6,
+  },
+  thumbnailWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.5)',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  thumbnailBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbnailBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+
+  // ── Controls Row ──
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.xl,
-    backgroundColor: COLORS.surface,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.outline,
+    paddingHorizontal: 8,
   },
-  voiceButton: {
+  controlBtn: {
     alignItems: 'center',
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    minWidth: 70,
-  },
-  voiceButtonActive: {
-    backgroundColor: COLORS.errorLight,
-  },
-  voiceButtonText: {
-    fontSize: 11,
-    color: COLORS.text.secondary,
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  voiceButtonTextActive: {
-    color: COLORS.error,
-  },
-  galleryButton: {
-    alignItems: 'center',
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    minWidth: 70,
-  },
-  galleryButtonDisabled: {
-    opacity: 0.5,
-  },
-  galleryButtonText: {
-    fontSize: 11,
-    color: COLORS.text.secondary,
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  captureButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.primary,
     justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
+    gap: 4,
+    minWidth: 52,
   },
-  captureButtonDisabled: {
-    opacity: 0.7,
+  controlBtnRecording: {},
+  controlBtnLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.8)',
   },
-  captureButtonInner: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: COLORS.primaryDark,
+
+  // ── Capture Button ──
+  captureOuter: {
+    width: 76,
+    height: 76,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  doneButton: {
+  captureRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    borderColor: '#FFF',
+    justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    minWidth: 70,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  doneButtonDisabled: {
-    opacity: 0.5,
+  captureInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFF',
   },
-  doneButtonText: {
-    fontSize: 11,
-    color: COLORS.success,
-    marginTop: 4,
-    fontWeight: '500',
+
+  // ── Done Icon ──
+  doneIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  doneButtonTextDisabled: {
-    color: COLORS.text.disabled,
+  doneIconCircleActive: {
+    backgroundColor: COLORS.success,
   },
+
+  // ── Loading ──
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: COLORS.background,
   },
-  loadingText: {
-    marginTop: SPACING.md,
-    color: COLORS.text.secondary,
+  loadingCard: {
+    alignItems: 'center',
+    gap: 16,
   },
+  loadingText: {
+    color: COLORS.text.secondary,
+    fontSize: 14,
+  },
+
+  // ── Permission ──
   permissionContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xl,
     backgroundColor: COLORS.background,
+    padding: SPACING.xl,
+  },
+  permissionCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    width: '100%',
+    ...SHADOWS.md,
+  },
+  permissionIconCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   permissionTitle: {
-    ...TYPOGRAPHY.h2,
+    fontSize: 20,
+    fontWeight: '700',
     color: COLORS.text.primary,
-    marginTop: SPACING.lg,
-    marginBottom: SPACING.sm,
+    marginBottom: 8,
     textAlign: 'center',
   },
   permissionText: {
     color: COLORS.text.secondary,
     textAlign: 'center',
-    marginBottom: SPACING.xl,
-    lineHeight: 20,
+    marginBottom: 24,
+    lineHeight: 22,
+    fontSize: 14,
   },
   permissionButton: {
-    paddingHorizontal: SPACING.lg,
+    width: '100%',
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
   },
+  permissionBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  permissionBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+
+  // ── Preview Modal ──
   previewModal: {
     backgroundColor: COLORS.surface,
-    margin: SPACING.lg,
+    margin: 16,
     borderRadius: BORDER_RADIUS.xl,
-    maxHeight: height * 0.8,
+    maxHeight: height * 0.82,
+    overflow: 'hidden',
   },
   previewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.lg,
-    paddingBottom: SPACING.md,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline,
+  },
+  previewHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   previewTitle: {
+    fontSize: 17,
+    fontWeight: '700',
     color: COLORS.text.primary,
   },
-  previewGrid: {
-    paddingHorizontal: SPACING.md,
+  previewCountBadge: {
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
-  photoPreview: {
-    width: (width - SPACING.lg * 4) / 2,
-    margin: SPACING.xs,
+  previewCountText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  previewCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewGrid: {
+    padding: 12,
+  },
+  previewGridRow: {
+    gap: 8,
+  },
+  photoPreviewCard: {
+    flex: 1,
+    margin: 4,
     borderRadius: BORDER_RADIUS.md,
     overflow: 'hidden',
     backgroundColor: COLORS.surfaceVariant,
+    maxWidth: (width - 56) / 2,
   },
   previewImage: {
     width: '100%',
-    height: 120,
+    height: 130,
     resizeMode: 'cover',
   },
-  photoOverlay: {
+  previewOverlayGradient: {
     position: 'absolute',
-    top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    padding: 8,
+  },
+  previewCardInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    padding: SPACING.xs,
   },
-  angleChip: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+  previewAngleBadge: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
-  angleChipText: {
+  previewAngleText: {
     fontSize: 10,
+    fontWeight: '600',
     color: COLORS.text.primary,
   },
-  photoActions: {
+  previewCardActions: {
     flexDirection: 'row',
-    alignSelf: 'flex-end',
+    gap: 4,
   },
   voiceIndicator: {
-    margin: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  deleteButton: {
-    margin: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-  },
-  emptyPreview: {
-    flex: 1,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: SPACING.xl,
+  },
+  deleteButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyPreview: {
+    alignItems: 'center',
+    paddingVertical: 48,
   },
   emptyPreviewText: {
-    color: COLORS.text.tertiary,
-    marginTop: SPACING.md,
+    color: COLORS.text.disabled,
+    marginTop: 12,
+    fontSize: 14,
   },
-  previewCloseButton: {
-    marginHorizontal: SPACING.lg,
-    marginBottom: SPACING.lg,
+  previewFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  previewContinueBtn: {
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  previewContinueGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  previewContinueText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFF',
   },
 });

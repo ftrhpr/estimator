@@ -245,7 +245,13 @@ try {
                         $unitPrice = !empty($part['unitPrice']) ? floatval($part['unitPrice']) : 0;
                         $totalPrice = !empty($part['totalPrice']) ? floatval($part['totalPrice']) : ($quantity * $unitPrice);
                         
-                        return [
+                        // Preserve damages (tagged work on photos) if present
+                        $damages = [];
+                        if (!empty($part['damages']) && is_array($part['damages'])) {
+                            $damages = $part['damages'];
+                        }
+                        
+                        $result = [
                             'name' => $partName,
                             'name_en' => !empty($part['name']) ? $part['name'] : $partName,
                             'part_number' => !empty($part['partNumber']) ? $part['partNumber'] : '',
@@ -253,7 +259,15 @@ try {
                             'unit_price' => $unitPrice,
                             'total_price' => $totalPrice,
                             'notes' => !empty($part['notes']) ? $part['notes'] : '',
+                            'damages' => $damages,
                         ];
+                        
+                        // Preserve part id for client-side matching
+                        if (!empty($part['id'])) {
+                            $result['id'] = $part['id'];
+                        }
+                        
+                        return $result;
                     }, $value);
                     $value = json_encode($transformedParts, JSON_UNESCAPED_UNICODE);
                     error_log("Parts transformed for update: " . $value);
@@ -319,6 +333,16 @@ try {
                 }
             }
             
+            // Convert ISO 8601 datetime values to MySQL format for TIMESTAMP/DATETIME columns
+            if (in_array($dbField, ['status_changed_at', 'updated_at', 'created_at']) && is_string($value) && !empty($value)) {
+                try {
+                    $dt = new DateTime($value);
+                    $value = $dt->format('Y-m-d H:i:s');
+                } catch (Exception $dtEx) {
+                    error_log("Warning: Could not parse datetime for $dbField: $value");
+                }
+            }
+
             $updateFields[] = "$dbField = :$appField";
             $bindParams[":$appField"] = $value;
             $processedDbFields[] = $dbField; // Track processed DB columns

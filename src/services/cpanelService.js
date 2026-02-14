@@ -747,6 +747,25 @@ export const fetchMechanicsFromCPanel = async () => {
  * @param {object} options - Request options with method and optional data
  * @returns {Promise<object>} API response
  */
+/**
+ * Fetch aggregate payment analytics data from cPanel
+ * Returns totals, breakdowns by method/mechanic/month, and outstanding invoices
+ */
+export const fetchAllPaymentsAnalytics = async () => {
+  if (!isCPanelConfigured()) {
+    console.warn('[cPanel] Not configured - skipping payment analytics fetch');
+    return { success: false, data: null };
+  }
+
+  try {
+    const response = await makeRequest('get-all-payments.php', null, 'GET');
+    return response;
+  } catch (error) {
+    console.error('[cPanel] Error fetching payment analytics:', error);
+    return { success: false, data: null, error: error.message };
+  }
+};
+
 export const fetchFromCPanel = async (endpoint, options = {}) => {
   console.log('[cpanelService] fetchFromCPanel called with endpoint:', endpoint);
   console.log('[cpanelService] CPANEL_API_URL:', CPANEL_API_URL ? 'SET' : 'NOT SET');
@@ -776,6 +795,7 @@ export default {
   createPaymentInCPanel,
   deletePaymentFromCPanel,
   fetchMechanicsFromCPanel,
+  fetchAllPaymentsAnalytics,
   fetchFromCPanel,
   isCPanelConfigured,
 };

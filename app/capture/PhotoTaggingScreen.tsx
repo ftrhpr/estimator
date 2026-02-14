@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
@@ -7,13 +8,14 @@ import {
     FlatList,
     Image,
     PanResponder,
+    Platform,
     ScrollView,
+    StatusBar,
     StyleSheet,
     TouchableOpacity,
     View,
 } from 'react-native';
 import {
-    Appbar,
     Button,
     Modal,
     Portal,
@@ -26,10 +28,12 @@ import Animated, {
     withSpring
 } from 'react-native-reanimated';
 
-import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
+import { BORDER_RADIUS, COLORS, SHADOWS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 import { DEFAULT_SERVICES } from '../../src/config/services';
 import { ServiceService } from '../../src/services/serviceService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
+
+const STATUSBAR_HEIGHT = Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44;
 
 const { width, height } = Dimensions.get('window');
 
@@ -208,11 +212,8 @@ export default function PhotoTaggingScreen() {
 
   const navigation = useNavigation();
   useLayoutEffect(() => {
-    const current = photos?.[currentPhotoIndex];
-    const angle = current?.angle || 'Tag Photo';
-    const counter = photos?.length ? ` (${currentPhotoIndex + 1}/${photos.length})` : '';
-    navigation.setOptions({ title: `${angle}${counter}` });
-  }, [photos, currentPhotoIndex, navigation]);
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   const handlePhotoPress = (event: any) => {
     const { locationX, locationY } = event.nativeEvent;
@@ -299,7 +300,7 @@ export default function PhotoTaggingScreen() {
       console.log('Service order saved successfully');
     } catch (error) {
       console.error('Error saving service order:', error);
-      Alert.alert('Error', 'Failed to save service order');
+      Alert.alert('შეცდომა', 'სერვისის რიგის შენახვა ვერ მოხერხდა');
     }
   };
 
@@ -524,10 +525,10 @@ export default function PhotoTaggingScreen() {
       setCustomServicePrice('');
       setShowCustomServiceModal(false);
 
-      Alert.alert('Success', 'Custom service created and saved to database');
+      Alert.alert('წარმატებით', 'სერვისი შეიქმნა და დაემატა ბაზაში');
     } catch (error) {
       console.error('Error saving custom service:', error);
-      Alert.alert('Error', 'Failed to save custom service. Please try again.');
+      Alert.alert('შეცდომა', 'სერვისის შენახვა ვერ მოხერხდა. სცადეთ თავიდან.');
     } finally {
       setSavingCustomService(false);
     }
@@ -621,9 +622,9 @@ export default function PhotoTaggingScreen() {
 
     if (totalServices === 0) {
       Alert.alert(
-        'No Services Tagged',
-        'Please tag at least one service before completing the estimate.',
-        [{ text: 'OK' }]
+        'სერვისი არ არის მონიშნული',
+        'გთხოვთ მონიშნეთ მინიმუმ ერთი სერვისი.',
+        [{ text: 'კარგი' }]
       );
       return;
     }
@@ -781,22 +782,38 @@ export default function PhotoTaggingScreen() {
   }));
 
   const currentPhoto = photos[currentPhotoIndex];
+  const totalServices = getServiceCount();
+  const totalEstimate = getTotalEstimate();
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <Appbar.Header style={styles.header}>
-        <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content 
-          title="დაზიანების მონიშვნა"
-          subtitle={`ფოტო ${currentPhotoIndex + 1} / ${photos.length}`}
-          titleStyle={styles.headerTitle}
-        />
-        <Appbar.Action 
-          icon="information-outline"
-          onPress={() => Alert.alert('როგორ მონიშნოთ', 'დააჭირეთ დაზიანებულ ადგილებს ფოტოზე სერვისისა და ფასის მისანიჭებლად.')}
-        />
-      </Appbar.Header>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.primaryDark} />
+
+      {/* Gradient Header */}
+      <LinearGradient
+        colors={[COLORS.primaryDark, COLORS.primary]}
+        style={styles.headerGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.headerRow}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
+            <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>დაზიანების მონიშვნა</Text>
+            <Text style={styles.headerSubtitle}>
+              ფოტო {currentPhotoIndex + 1}/{photos.length}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => Alert.alert('როგორ მონიშნოთ', 'დააჭირეთ დაზიანებულ ადგილებს ფოტოზე სერვისისა და ფასის მისანიჭებლად.')}
+          >
+            <MaterialCommunityIcons name="information-outline" size={22} color="rgba(255,255,255,0.8)" />
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
 
       {/* Photo Display */}
       <View style={styles.photoContainer}>
@@ -857,23 +874,34 @@ export default function PhotoTaggingScreen() {
 
       {/* Summary Bar */}
       <View style={styles.summaryBar}>
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryNumber}>{getServiceCount()}</Text>
-          <Text style={styles.summaryLabel}>Services</Text>
+        <View style={styles.summaryStatGroup}>
+          <View style={styles.summaryStatItem}>
+            <Text style={styles.summaryStatNumber}>{totalServices}</Text>
+            <Text style={styles.summaryStatLabel}>სერვისები</Text>
+          </View>
+          <View style={styles.summaryStatDivider} />
+          <View style={styles.summaryStatItem}>
+            <Text style={styles.summaryEstimate}>{formatCurrencyGEL(totalEstimate)}</Text>
+            <Text style={styles.summaryStatLabel}>ჯამი</Text>
+          </View>
         </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.summaryItem}>
-          <Text style={styles.summaryNumber}>{formatCurrencyGEL(getTotalEstimate())}</Text>
-          <Text style={styles.summaryLabel}>Total</Text>
-        </View>
-        <Button
-          mode="contained"
+
+        <TouchableOpacity
+          style={[styles.continueBtn, totalServices === 0 && styles.continueBtnDisabled]}
           onPress={handleComplete}
-          style={styles.completeButton}
-          disabled={getServiceCount() === 0}
+          disabled={totalServices === 0}
+          activeOpacity={0.85}
         >
-          Complete
-        </Button>
+          <LinearGradient
+            colors={totalServices > 0 ? [COLORS.primary, COLORS.primaryDark] : [COLORS.text.disabled, COLORS.text.disabled]}
+            style={styles.continueBtnGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Text style={styles.continueBtnText}>გაგრძელება</Text>
+            <MaterialCommunityIcons name="arrow-right" size={18} color="#FFF" />
+          </LinearGradient>
+        </TouchableOpacity>
       </View>
 
       {/* Service Selection Modal */}
@@ -1187,7 +1215,7 @@ export default function PhotoTaggingScreen() {
 
             <TextInput
               mode="outlined"
-              label="Service Name (English)"
+              label="სერვისის სახელი (ინგლისური)"
               value={customServiceName}
               onChangeText={setCustomServiceName}
               placeholder="e.g., Glass Polishing"
@@ -1244,16 +1272,40 @@ export default function PhotoTaggingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundDark,
   },
-  header: {
-    backgroundColor: COLORS.surface,
-    elevation: 2,
+  // ── Gradient Header ──
+  headerGradient: {
+    paddingTop: STATUSBAR_HEIGHT + 4,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerCenter: {
+    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: TYPOGRAPHY.fontSize['2xl'],
-    fontWeight: '600',
-    color: COLORS.text.primary,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFF',
+    letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 2,
   },
   photoContainer: {
     flex: 1,
@@ -1338,25 +1390,27 @@ const styles = StyleSheet.create({
   },
   thumbnailContainer: {
     backgroundColor: COLORS.surface,
-    paddingVertical: SPACING.md,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: COLORS.outline,
   },
   thumbnailList: {
     paddingHorizontal: SPACING.md,
+    gap: 8,
   },
   thumbnail: {
     width: 80,
     height: 60,
-    marginRight: SPACING.sm,
     borderRadius: BORDER_RADIUS.md,
     overflow: 'hidden',
-    borderWidth: 2,
+    borderWidth: 2.5,
     borderColor: 'transparent',
     position: 'relative',
+    ...SHADOWS.sm,
   },
   thumbnailActive: {
     borderColor: COLORS.primary,
+    ...SHADOWS.md,
   },
   thumbnailImage: {
     width: '100%',
@@ -1368,16 +1422,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    padding: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingVertical: 3,
+    paddingHorizontal: 5,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   thumbnailAngle: {
-    color: COLORS.text.onPrimary,
+    color: '#FFF',
     fontSize: 8,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   tagCount: {
     backgroundColor: COLORS.primary,
@@ -1389,42 +1444,72 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tagCountText: {
-    color: COLORS.text.onPrimary,
+    color: '#FFF',
     fontSize: 8,
     fontWeight: 'bold',
   },
+  // ── Summary Bar ──
   summaryBar: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: COLORS.outline,
-    elevation: 2,
+    gap: 14,
+    ...SHADOWS.md,
   },
-  summaryItem: {
+  summaryStatGroup: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: SPACING.lg,
+    gap: 14,
   },
-  summaryNumber: {
-    fontSize: 18,
-    fontWeight: 'bold',
+  summaryStatItem: {
+    alignItems: 'center',
+  },
+  summaryStatNumber: {
+    fontSize: 20,
+    fontWeight: '800',
     color: COLORS.primary,
   },
-  summaryLabel: {
-    fontSize: 12,
-    color: COLORS.text.secondary,
-    marginTop: 2,
+  summaryEstimate: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.secondary,
   },
-  summaryDivider: {
+  summaryStatLabel: {
+    fontSize: 11,
+    color: COLORS.text.tertiary,
+    marginTop: 1,
+    fontWeight: '500',
+  },
+  summaryStatDivider: {
     width: 1,
     height: 30,
     backgroundColor: COLORS.outline,
-    marginRight: SPACING.lg,
   },
-  completeButton: {
+  continueBtn: {
+    flex: 1,
     marginLeft: 'auto',
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  continueBtnDisabled: {
+    opacity: 0.5,
+  },
+  continueBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  continueBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFF',
   },
   
   // Enhanced Service Modal Styles

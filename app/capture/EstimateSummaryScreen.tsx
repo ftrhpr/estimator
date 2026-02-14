@@ -1,21 +1,22 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
     Alert,
     Dimensions,
     Linking,
+    Platform,
     ScrollView,
+    StatusBar,
     StyleSheet,
+    TouchableOpacity,
     View
 } from 'react-native';
 import {
     ActivityIndicator,
-    Appbar,
     Button,
-    Card,
-    Checkbox,
     Chip,
     Divider,
     IconButton,
@@ -27,15 +28,17 @@ import {
 } from 'react-native-paper';
 
 import { CarSelector, SelectedCar } from '../../src/components/common/CarSelector';
-import { BORDER_RADIUS, COLORS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
+import { BORDER_RADIUS, COLORS, SHADOWS, SPACING, TYPOGRAPHY } from '../../src/config/constants';
 import { createInspection, getAllInspections } from '../../src/services/firebase';
 import { PartsService } from '../../src/services/partsService';
 import { StorageService } from '../../src/services/storageService';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
+const STATUSBAR_HEIGHT = Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44;
+
 const { width } = Dimensions.get('window');
 
-export const options = () => ({ title: 'Estimate Summary' });
+export const options = () => ({ title: 'შეფასების შეჯამება' });
 
 interface EstimateItem {
   id: string;
@@ -189,7 +192,7 @@ export default function EstimateSummaryScreen() {
 
   const navigation = useNavigation();
   useLayoutEffect(() => {
-    const title = customerName || plate || 'Estimate Summary';
+    const title = customerName || plate || 'შეფასების შეჯამება';
     const itemCount = estimateItems?.length ? ` (${estimateItems.length})` : '';
     navigation.setOptions({ title: `${title}${itemCount}` });
   }, [customerName, plate, estimateItems, navigation]);
@@ -370,8 +373,8 @@ export default function EstimateSummaryScreen() {
         // Show a notification that customer was found
         const carInfo = [recentCustomer.carMake, recentCustomer.carModel].filter(Boolean).join(' ');
         Alert.alert(
-          'Customer Found',
-          `Welcome back ${recentCustomer.customerName || 'Customer'}!\n${carInfo ? `Car: ${carInfo}\n` : ''}Plate: ${recentCustomer.plate || 'Not specified'}`,
+          'კლიენტი ნაპოვნია',
+          `მოგესალმებით ${recentCustomer.customerName || 'კლიენტი'}!\n${carInfo ? `ავტო: ${carInfo}\n` : ''}ნომერი: ${recentCustomer.plate || 'არ არის მითითებული'}`,
           [{ text: 'OK' }]
         );
         
@@ -491,12 +494,12 @@ export default function EstimateSummaryScreen() {
       if (canOpen) {
         await Linking.openURL(whatsappUrl);
       } else {
-        Alert.alert('WhatsApp Not Available', 'Please install WhatsApp to send estimates');
+        Alert.alert('WhatsApp არ არის', 'გთხოვთ დააყენოთ WhatsApp შეფასებების გასაგზავნად');
       }
       
     } catch (error) {
       console.error('Error generating PDF:', error);
-      Alert.alert('Error', 'Failed to generate estimate. Please try again.');
+      Alert.alert('შეცდომა', 'შეფასების გენერირება ვერ მოხერხდა. სცადეთ თავიდან.');
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -505,9 +508,9 @@ export default function EstimateSummaryScreen() {
   const saveInvoice = async () => {
     if (!customerInfo.phone) {
       Alert.alert(
-        'Customer Info Required',
-        'Please add customer phone number before saving',
-        [{ text: 'Add Customer', onPress: () => setShowCustomerModal(true) }]
+        'კლიენტის ინფორმაცია',
+        'გთხოვთ დაამატოთ კლიენტის ტელეფონის ნომერი',
+        [{ text: 'დამატება', onPress: () => setShowCustomerModal(true) }]
       );
       return;
     }
@@ -627,20 +630,20 @@ export default function EstimateSummaryScreen() {
 
       setInvoiceSaved(true);
       Alert.alert(
-        'Invoice Saved!',
-        `Invoice #${docId.slice(0, 8).toUpperCase()} has been saved successfully.`,
+        '✅ შენახულია!',
+        `საქმე #${docId.slice(0, 8).toUpperCase()} წარმატებით შეინახა.`,
         [
-          { text: 'View Cases', onPress: () => router.push('/(tabs)/cases') },
-          { text: 'OK' }
+          { text: 'საქმეების ნახვა', onPress: () => router.push('/(tabs)/cases') },
+          { text: 'კარგი' }
         ]
       );
     } catch (error: any) {
       console.error('Error saving invoice:', error);
       const errorMessage = error?.message || 'Unknown error';
       Alert.alert(
-        'Save Failed',
-        `Failed to save invoice: ${errorMessage}\n\nPlease check:\n• Firebase is configured (.env file)\n• Internet connection\n• Firestore permissions`,
-        [{ text: 'OK' }]
+        'შენახვა ვერ მოხერხდა',
+        `შეცდომა: ${errorMessage}\n\nშეამოწმეთ:\n• Firebase კონფიგურაცია\n• ინტერნეტ კავშირი\n• Firestore ნებართვები`,
+        [{ text: 'კარგი' }]
       );
     } finally {
       setIsSaving(false);
@@ -650,28 +653,28 @@ export default function EstimateSummaryScreen() {
   const handleStartJob = () => {
     if (!customerInfo.phone) {
       Alert.alert(
-        'Customer Info Required',
-        'Please add customer phone number before starting the job',
-        [{ text: 'Add Customer', onPress: () => setShowCustomerModal(true) }]
+        'კლიენტის ინფორმაცია',
+        'გთხოვთ დაამატოთ ტელეფონის ნომერი სამუშაოს დაწყებამდე',
+        [{ text: 'დამატება', onPress: () => setShowCustomerModal(true) }]
       );
       return;
     }
 
     Alert.alert(
-      'Start Job',
-      `Start work on ${estimateItems.length} services for ${formatCurrencyGEL(getTotalPrice())}?`,
+      'სამუშაოს დაწყება',
+      `დაიწყება მუშაობა ${estimateItems.length} სერვისზე თანხით ${formatCurrencyGEL(getTotalPrice())}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'გაუქმება', style: 'cancel' },
         { 
-          text: 'Start Work', 
+          text: 'დაწყება', 
           onPress: () => {
             setJobStarted(true);
             // Navigate to job management or back to dashboard
             setTimeout(() => {
               Alert.alert(
-                'Job Started!',
-                'Work has been marked as started. Track progress in the Cases tab.',
-                [{ text: 'OK', onPress: () => router.push('/(tabs)/cases') }]
+                '✅ მუშაობა დაიწყო!',
+                'სამუშაო დაწყებულად არის მონიშნული. თვალი ადევნეთ საქმეების ტაბიდან.',
+                [{ text: 'კარგი', onPress: () => router.push('/(tabs)/cases') }]
               );
             }, 1000);
           }
@@ -680,193 +683,225 @@ export default function EstimateSummaryScreen() {
     );
   };
 
+  // Computed discount values for display
+  const svcDiscPct = parseFloat(servicesDiscount) || 0;
+  const prtDiscPct = parseFloat(partsDiscount) || 0;
+  const glbDiscPct = parseFloat(globalDiscount) || 0;
+  const hasAnyDiscount = svcDiscPct > 0 || prtDiscPct > 0 || glbDiscPct > 0;
+  const rawServicesTotal = estimateItems.reduce((t, i) => t + i.price, 0);
+  const rawPartsTotal = parts.reduce((t, p) => t + p.totalPrice, 0);
+
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <Appbar.Header style={styles.header}>
-        <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content 
-          title="Estimate Summary"
-          titleStyle={styles.headerTitle}
-        />
-        <Appbar.Action 
-          icon="share-variant" 
-          onPress={generateAndSendPDF}
-          disabled={isGeneratingPDF}
-        />
-        <Appbar.Action 
-          icon="api" 
-          onPress={() => router.push('/admin/cpanel-test')}
-        />
-      </Appbar.Header>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
+
+      {/* Gradient Header */}
+      <LinearGradient
+        colors={[COLORS.primary, COLORS.primaryDark]}
+        style={styles.headerGradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.headerRow}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
+            <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>შეფასების შეჯამება</Text>
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerBtn} onPress={generateAndSendPDF}>
+              <MaterialCommunityIcons name="share-variant-outline" size={20} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => router.push('/admin/cpanel-test')}>
+              <MaterialCommunityIcons name="api" size={20} color="rgba(255,255,255,0.7)" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Total Price Banner */}
+        <View style={styles.totalBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.totalLabel}>სულ შეფასება</Text>
+            <Text style={styles.totalSubtext} numberOfLines={1}>
+              {estimateItems.length} სერვისი{parts.length > 0 ? ` • ${parts.length} ნაწილი` : ''}
+              {hasAnyDiscount ? ' • ფასდაკლებით' : ''}
+            </Text>
+          </View>
+          <View style={styles.totalPriceWrap}>
+            <Text style={styles.totalPrice}>{formatCurrencyGEL(getTotalPrice())}</Text>
+          </View>
+        </View>
+      </LinearGradient>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Total Summary Card */}
-        <Card style={styles.totalCard}>
-          <Card.Content>
-            <View style={styles.totalHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.totalLabel}>სულ შეფასება</Text>
-                <Text style={styles.totalSubtext} numberOfLines={1}>
-                  {estimateItems.length} სერვისი • მზადაა დასადასტურებლად
-                </Text>
-              </View>
-              <Text style={styles.totalPrice}>{formatCurrencyGEL(getTotalPrice())}</Text>
-            </View>
-          </Card.Content>
-        </Card>
 
-        {/* Discounts Card */}
-        <Card style={styles.discountCard}>
-          <Card.Content>
-            <View style={styles.discountHeader}>
-              <MaterialCommunityIcons name="percent" size={20} color={COLORS.primary} />
-              <Text style={styles.discountTitle}>ფასდაკლებები</Text>
+        {/* Discounts & VAT Section */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionIconCircle}>
+              <MaterialCommunityIcons name="sale" size={18} color={COLORS.error} />
             </View>
+            <Text style={styles.sectionTitle}>ფასდაკლებები</Text>
+          </View>
 
-            <View style={styles.discountRow}>
-              <View style={styles.discountInputGroup}>
-                <Text style={styles.discountLabel}>სერვისები (%)</Text>
+          <View style={styles.discountGrid}>
+            {/* Services Discount */}
+            <View style={styles.discountCell}>
+              <Text style={styles.discountCellLabel}>სერვისები</Text>
+              <View style={styles.discountInputWrap}>
                 <TextInput
                   value={servicesDiscount}
                   onChangeText={setServicesDiscount}
                   keyboardType="decimal-pad"
                   placeholder="0"
-                  style={styles.discountInput}
+                  style={styles.discountInputField}
                   mode="outlined"
                   dense
                   outlineColor={COLORS.outline}
                   activeOutlineColor={COLORS.primary}
                 />
-                {servicesDiscount && parseFloat(servicesDiscount) > 0 && (
-                  <Text style={styles.discountAmount}>
-                    -{formatCurrencyGEL((estimateItems.reduce((t, i) => t + i.price, 0) * (parseFloat(servicesDiscount) || 0)) / 100)}
-                  </Text>
-                )}
+                <Text style={styles.pctLabel}>%</Text>
               </View>
+              {svcDiscPct > 0 && (
+                <Text style={styles.discountSavedText}>-{formatCurrencyGEL(rawServicesTotal * svcDiscPct / 100)}</Text>
+              )}
+            </View>
 
-              <View style={styles.discountInputGroup}>
-                <Text style={styles.discountLabel}>ნაწილები (%)</Text>
+            {/* Parts Discount */}
+            <View style={styles.discountCell}>
+              <Text style={styles.discountCellLabel}>ნაწილები</Text>
+              <View style={styles.discountInputWrap}>
                 <TextInput
                   value={partsDiscount}
                   onChangeText={setPartsDiscount}
                   keyboardType="decimal-pad"
                   placeholder="0"
-                  style={styles.discountInput}
+                  style={styles.discountInputField}
                   mode="outlined"
                   dense
                   outlineColor={COLORS.outline}
                   activeOutlineColor={COLORS.primary}
                 />
-                {partsDiscount && parseFloat(partsDiscount) > 0 && (
-                  <Text style={styles.discountAmount}>
-                    -{formatCurrencyGEL((parts.reduce((t, p) => t + p.totalPrice, 0) * (parseFloat(partsDiscount) || 0)) / 100)}
-                  </Text>
-                )}
+                <Text style={styles.pctLabel}>%</Text>
               </View>
+              {prtDiscPct > 0 && (
+                <Text style={styles.discountSavedText}>-{formatCurrencyGEL(rawPartsTotal * prtDiscPct / 100)}</Text>
+              )}
+            </View>
 
-              <View style={styles.discountInputGroup}>
-                <Text style={styles.discountLabel}>საერთო (%)</Text>
+            {/* Global Discount */}
+            <View style={styles.discountCell}>
+              <Text style={[styles.discountCellLabel, { fontWeight: '700' }]}>საერთო</Text>
+              <View style={styles.discountInputWrap}>
                 <TextInput
                   value={globalDiscount}
                   onChangeText={setGlobalDiscount}
                   keyboardType="decimal-pad"
                   placeholder="0"
-                  style={styles.discountInput}
+                  style={styles.discountInputField}
                   mode="outlined"
                   dense
                   outlineColor={COLORS.outline}
-                  activeOutlineColor={COLORS.primary}
+                  activeOutlineColor={COLORS.error}
                 />
-                {globalDiscount && parseFloat(globalDiscount) > 0 && (
-                  <Text style={styles.discountAmount}>
-                    -{formatCurrencyGEL(((estimateItems.reduce((t, i) => t + i.price, 0) + parts.reduce((t, p) => t + p.totalPrice, 0)) * (parseFloat(globalDiscount) || 0)) / 100)}
-                  </Text>
-                )}
+                <Text style={styles.pctLabel}>%</Text>
               </View>
-            </View>
-
-            {/* VAT Checkbox */}
-            <Divider style={{ marginVertical: SPACING.sm }} />
-            <View style={styles.vatRow}>
-              <View style={styles.vatCheckboxContainer}>
-                <Checkbox
-                  status={includeVAT ? 'checked' : 'unchecked'}
-                  onPress={() => setIncludeVAT(!includeVAT)}
-                  color={COLORS.primary}
-                />
-                <Text style={styles.vatLabel}>დღგ +18%</Text>
-              </View>
-              {includeVAT && (
-                <Text style={styles.vatAmount}>+{formatCurrencyGEL(getVATAmount())}</Text>
+              {glbDiscPct > 0 && (
+                <Text style={styles.discountSavedText}>-{formatCurrencyGEL((rawServicesTotal + rawPartsTotal) * glbDiscPct / 100)}</Text>
               )}
             </View>
-          </Card.Content>
-        </Card>
+          </View>
 
-        {/* Customer Info */}
-        <Card style={styles.customerCard}>
-          <Card.Content>
-            <View style={styles.customerHeader}>
-              <View style={styles.customerTitleRow}>
-                <MaterialCommunityIcons name="account" size={20} color={COLORS.text.primary} />
-                <Text style={styles.sectionTitle}>მომხმარებელი</Text>
-              </View>
-              <IconButton
-                icon="qrcode-scan"
-                onPress={handleQRScan}
-                size={20}
-                iconColor={COLORS.primary}
-              />
-            </View>
-
-            {customerInfo.phone ? (
-              <View style={styles.customerInfo}>
-                {customerInfo.isRepeat && (
-                  <Chip
-                    icon="account-check"
-                    mode="flat"
-                    style={styles.repeatCustomerChip}
-                    textStyle={styles.repeatCustomerText}
-                  >
-                    მუდმივი მომხმარებელი
-                  </Chip>
-                )}
-                <View style={styles.customerDetails}>
-                  {customerInfo.name && (
-                    <Text style={styles.customerName}>{customerInfo.name}</Text>
-                  )}
-                  <Text style={styles.customerPhone}>{customerInfo.phone}</Text>
-                </View>
-                <IconButton
-                  icon="pencil"
-                  onPress={() => setShowCustomerModal(true)}
-                  size={18}
-                  iconColor={COLORS.primary}
-                />
-              </View>
-            ) : (
-              <Button
-                mode="outlined"
-                onPress={() => setShowCustomerModal(true)}
-                icon="account-plus"
-                style={styles.addCustomerButton}
-                contentStyle={styles.addCustomerButtonContent}
-                labelStyle={styles.addCustomerButtonLabel}
+          {/* Quick Chips */}
+          <View style={styles.quickChipRow}>
+            {[5, 10, 15, 20].map(pct => (
+              <TouchableOpacity
+                key={pct}
+                style={[
+                  styles.quickChip,
+                  glbDiscPct === pct && styles.quickChipActive,
+                ]}
+                onPress={() => setGlobalDiscount(glbDiscPct === pct ? '0' : String(pct))}
               >
-                მომხმარებლის დამატება
-              </Button>
+                <Text style={[styles.quickChipText, glbDiscPct === pct && styles.quickChipTextActive]}>{pct}%</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* VAT Toggle */}
+          <TouchableOpacity
+            style={[styles.vatToggle, includeVAT && styles.vatToggleActive]}
+            onPress={() => setIncludeVAT(!includeVAT)}
+          >
+            <MaterialCommunityIcons
+              name={includeVAT ? 'checkbox-marked' : 'checkbox-blank-outline'}
+              size={22}
+              color={includeVAT ? COLORS.primary : COLORS.text.tertiary}
+            />
+            <Text style={styles.vatLabel}>დღგ +18%</Text>
+            {includeVAT && (
+              <Text style={styles.vatAmount}>+{formatCurrencyGEL(getVATAmount())}</Text>
             )}
-          </Card.Content>
-        </Card>
+          </TouchableOpacity>
+        </View>
+
+        {/* Customer Section */}
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconCircle, { backgroundColor: COLORS.secondary + '15' }]}>
+              <MaterialCommunityIcons name="account" size={18} color={COLORS.secondary} />
+            </View>
+            <Text style={styles.sectionTitle}>მომხმარებელი</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity style={styles.qrScanBtn} onPress={handleQRScan}>
+              <MaterialCommunityIcons name="qrcode-scan" size={20} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
+
+          {customerInfo.phone ? (
+            <View style={styles.customerInfoCard}>
+              <View style={styles.customerAvatarCircle}>
+                <MaterialCommunityIcons name="account" size={24} color={COLORS.primary} />
+              </View>
+              <View style={styles.customerDetails}>
+                {customerInfo.isRepeat && (
+                  <View style={styles.repeatBadge}>
+                    <MaterialCommunityIcons name="star" size={10} color="#FFF" />
+                    <Text style={styles.repeatBadgeText}>მუდმივი</Text>
+                  </View>
+                )}
+                {customerInfo.name && (
+                  <Text style={styles.customerName}>{customerInfo.name}</Text>
+                )}
+                <Text style={styles.customerPhone}>{customerInfo.phone}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.editCustomerBtn}
+                onPress={() => setShowCustomerModal(true)}
+              >
+                <MaterialCommunityIcons name="pencil-outline" size={18} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.addCustomerButton}
+              onPress={() => setShowCustomerModal(true)}
+            >
+              <MaterialCommunityIcons name="account-plus-outline" size={22} color={COLORS.primary} />
+              <Text style={styles.addCustomerText}>მომხმარებლის დამატება</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Services Breakdown */}
-        <Card style={styles.servicesCard}>
-          <Card.Content>
-            <View style={styles.servicesTitleRow}>
-              <MaterialCommunityIcons name="wrench" size={20} color={COLORS.text.primary} />
-              <Text style={styles.sectionTitle}>სერვისების ჩამონათვალი</Text>
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconCircle, { backgroundColor: COLORS.primary + '15' }]}>
+              <MaterialCommunityIcons name="wrench" size={18} color={COLORS.primary} />
             </View>
+            <Text style={styles.sectionTitle}>სერვისების ჩამონათვალი</Text>
+          </View>
             
             {(() => {
               const groupedItems = getGroupedEstimateItems();
@@ -879,7 +914,7 @@ export default function EstimateSummaryScreen() {
                       description={
                         item.count > 1
                           ? `${item.count} × ${formatCurrencyGEL(item.price / item.count)} თითო`
-                          : 'Single service'
+                          : 'ერთი სერვისი'
                       }
                       right={() => (
                         <Text style={styles.itemPrice}>{formatCurrencyGEL(item.price)}</Text>
@@ -918,23 +953,20 @@ export default function EstimateSummaryScreen() {
                 <Text style={styles.subtotalPrice}>{formatCurrencyGEL(getServicesTotal())}</Text>
               </View>
             )}
-          </Card.Content>
-        </Card>
+        </View>
 
         {/* Parts Section */}
-        <Card style={styles.servicesCard}>
-          <Card.Content>
-            <View style={styles.servicesTitleRow}>
-              <MaterialCommunityIcons name="cog" size={20} color={COLORS.text.primary} />
-              <Text style={styles.sectionTitle}>ნაწილები</Text>
-              <View style={{ flex: 1 }} />
-              <IconButton
-                icon="plus-circle"
-                iconColor={COLORS.primary}
-                size={24}
-                onPress={openAddPartModal}
-              />
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconCircle, { backgroundColor: COLORS.accent + '15' }]}>
+              <MaterialCommunityIcons name="cog" size={18} color={COLORS.accent} />
             </View>
+            <Text style={styles.sectionTitle}>ნაწილები</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity style={styles.addPartBtnSmall} onPress={openAddPartModal}>
+              <MaterialCommunityIcons name="plus" size={18} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
             
             {parts.length === 0 ? (
               <Button
@@ -1013,50 +1045,66 @@ export default function EstimateSummaryScreen() {
                 </View>
               </View>
             )}
-          </Card.Content>
-        </Card>
+        </View>
       </ScrollView>
 
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
-        <Button
-          mode="contained"
+        <TouchableOpacity
           onPress={saveInvoice}
-          loading={isSaving}
           disabled={isSaving || invoiceSaved}
-          icon={invoiceSaved ? "check-circle" : "content-save"}
-          style={[styles.actionButton, invoiceSaved ? styles.completedButton : styles.saveInvoiceButton]}
-          contentStyle={styles.actionButtonContent}
-          labelStyle={styles.actionButtonLabel}
+          style={[styles.saveBtn, invoiceSaved && styles.saveBtnDone]}
+          activeOpacity={0.85}
         >
-          {isSaving ? 'ინახება...' : invoiceSaved ? 'შენახულია!' : 'ინვოისის შენახვა'}
-        </Button>
-
-        <View style={styles.actionButtonsRow}>
-          <Button
-            mode="contained"
-            onPress={generateAndSendPDF}
-            loading={isGeneratingPDF}
-            disabled={isGeneratingPDF}
-            icon="whatsapp"
-            style={[styles.actionButtonHalf, styles.whatsappButton]}
-            contentStyle={styles.actionButtonContent}
-            labelStyle={styles.whatsappButtonText}
+          <LinearGradient
+            colors={invoiceSaved ? [COLORS.success, '#059669'] : [COLORS.primary, COLORS.primaryDark]}
+            style={styles.saveBtnGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
           >
-            {isGeneratingPDF ? 'იგზავნება...' : 'WhatsApp'}
-          </Button>
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <MaterialCommunityIcons
+                name={invoiceSaved ? 'check-circle' : 'content-save-outline'}
+                size={20}
+                color="#FFF"
+              />
+            )}
+            <Text style={styles.saveBtnText}>
+              {isSaving ? 'ინახება...' : invoiceSaved ? 'შენახულია!' : 'ინვოისის შენახვა'}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity>
 
-          <Button
-            mode="contained"
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={styles.whatsappBtn}
+            onPress={generateAndSendPDF}
+            disabled={isGeneratingPDF}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="whatsapp" size={20} color="#FFF" />
+            <Text style={styles.actionBtnText}>
+              {isGeneratingPDF ? 'იგზავნება...' : 'WhatsApp'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.startBtn, (!customerInfo.phone || jobStarted) && styles.actionBtnDisabled]}
             onPress={handleStartJob}
             disabled={!customerInfo.phone || jobStarted}
-            icon={jobStarted ? "check-circle" : "play-circle"}
-            style={[styles.actionButtonHalf, jobStarted ? styles.completedButton : styles.startButton]}
-            contentStyle={styles.actionButtonContent}
-            labelStyle={styles.actionButtonLabel}
+            activeOpacity={0.85}
           >
-            {jobStarted ? 'დაწყებულია!' : 'სამუშაოს დაწყება'}
-          </Button>
+            <MaterialCommunityIcons
+              name={jobStarted ? 'check-circle' : 'play-circle-outline'}
+              size={20}
+              color="#FFF"
+            />
+            <Text style={styles.actionBtnText}>
+              {jobStarted ? 'დაწყებულია!' : 'სამუშაოს დაწყ...'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -1414,187 +1462,263 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  header: {
-    backgroundColor: COLORS.surface,
-    elevation: 2,
+  // ── Gradient Header ──
+  headerGradient: {
+    paddingTop: STATUSBAR_HEIGHT + 4,
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
-    ...TYPOGRAPHY.h2,
-    color: COLORS.text.primary,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFF',
+    letterSpacing: 0.3,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  totalBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: BORDER_RADIUS.xl,
+    padding: 16,
+    gap: 12,
+  },
+  totalLabel: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  totalSubtext: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  totalPriceWrap: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  totalPrice: {
+    color: '#FFF',
+    fontSize: 26,
+    fontWeight: '800',
   },
   content: {
     flex: 1,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
-  totalCard: {
-    marginBottom: SPACING.lg,
+  // ── Section Cards ──
+  sectionCard: {
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
-    elevation: 3,
-    backgroundColor: COLORS.primary,
+    padding: 16,
+    marginBottom: 14,
+    ...SHADOWS.sm,
   },
-  totalHeader: {
+  sectionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: SPACING.md,
+    gap: 10,
+    marginBottom: 14,
   },
-  totalLabel: {
-    color: COLORS.text.onPrimary,
+  sectionIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.error + '12',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sectionTitle: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '700',
+    color: COLORS.text.primary,
   },
-  totalPrice: {
-    color: COLORS.text.onPrimary,
-    fontSize: 28,
-    fontWeight: 'bold',
-    flexShrink: 0,
+  // ── Discount Section ──
+  discountGrid: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  totalSubtext: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 13,
-    marginTop: SPACING.xs,
-    flexShrink: 1,
+  discountCell: {
+    flex: 1,
+    gap: 4,
   },
-  discountCard: {
-    marginBottom: SPACING.lg,
-    borderRadius: BORDER_RADIUS.lg,
-    elevation: 2,
-    backgroundColor: '#FFF8E1',
+  discountCellLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+    textAlign: 'center',
   },
-  discountHeader: {
+  discountInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
   },
-  discountTitle: {
-    ...TYPOGRAPHY.h4,
-    color: COLORS.text.primary,
-    marginLeft: SPACING.xs,
-  },
-  discountRow: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-    justifyContent: 'space-between',
-  },
-  discountInputGroup: {
+  discountInputField: {
+    backgroundColor: COLORS.background,
     flex: 1,
-    gap: SPACING.xs,
+    height: 40,
+    fontSize: 15,
   },
-  discountLabel: {
-    fontSize: 12,
+  pctLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text.tertiary,
+    marginLeft: 4,
+  },
+  discountSavedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.error,
+    textAlign: 'center',
+  },
+  quickChipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  quickChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.outline,
+  },
+  quickChipActive: {
+    backgroundColor: COLORS.error,
+    borderColor: COLORS.error,
+  },
+  quickChipText: {
+    fontSize: 13,
     fontWeight: '600',
     color: COLORS.text.secondary,
   },
-  discountInput: {
-    backgroundColor: '#fff',
-    height: 40,
+  quickChipTextActive: {
+    color: '#FFF',
   },
-  discountAmount: {
-    fontSize: 11,
-    color: COLORS.error,
-    fontWeight: '600',
+  divider: {
+    height: 1,
+    backgroundColor: COLORS.outline,
+    marginVertical: 12,
   },
-  vatRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: SPACING.xs,
-  },
-  vatCheckboxContainer: {
+  vatToggle: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
   },
+  vatToggleActive: {},
   vatLabel: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.text.primary,
-    marginLeft: SPACING.xs,
+    flex: 1,
   },
   vatAmount: {
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.success,
   },
-  customerCard: {
-    marginBottom: SPACING.lg,
-    borderRadius: BORDER_RADIUS.lg,
-    elevation: 2,
-  },
-  customerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  // ── Customer Section ──
+  qrScanBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.primary + '10',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: SPACING.sm,
   },
-  customerTitleRow: {
+  customerInfoCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  sectionTitle: {
-    ...TYPOGRAPHY.h4,
-    color: COLORS.text.primary,
-  },
-  customerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.md,
-    backgroundColor: COLORS.surfaceVariant,
-    padding: SPACING.md,
+    gap: 12,
+    backgroundColor: COLORS.background,
+    padding: 14,
     borderRadius: BORDER_RADIUS.lg,
   },
-  repeatCustomerChip: {
-    backgroundColor: COLORS.success,
-  },
-  repeatCustomerText: {
-    color: COLORS.text.onPrimary,
-    fontSize: 12,
+  customerAvatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.primary + '12',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   customerDetails: {
     flex: 1,
   },
+  repeatBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: COLORS.success,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+  },
+  repeatBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFF',
+  },
   customerName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: COLORS.text.primary,
   },
   customerPhone: {
-    fontSize: 14,
+    fontSize: 13,
     color: COLORS.text.secondary,
-    marginTop: 2,
+    marginTop: 1,
+  },
+  editCustomerBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.primary + '10',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addCustomerButton: {
-    borderColor: COLORS.primary,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    backgroundColor: `${COLORS.primary}08`,
-  },
-  addCustomerButtonContent: {
-    height: 56,
-  },
-  addCustomerButtonLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  servicesTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  servicesCard: {
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: COLORS.primary + '40',
+    backgroundColor: COLORS.primary + '06',
     borderRadius: BORDER_RADIUS.lg,
-    elevation: 2,
-    marginBottom: SPACING.xl,
+    paddingVertical: 18,
   },
-  servicePhoto: {
-    width: 50,
-    height: 40,
-    borderRadius: BORDER_RADIUS.sm,
-    backgroundColor: COLORS.surfaceVariant,
+  addCustomerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
+  // ── Services & Parts ──
   serviceIconContainer: {
     width: 50,
     height: 40,
@@ -1615,7 +1739,7 @@ const styles = StyleSheet.create({
   countBadgeText: {
     fontSize: 10,
     lineHeight: 12,
-    color: COLORS.text.onPrimary,
+    color: '#FFF',
     fontWeight: 'bold',
   },
   serviceTitle: {
@@ -1650,6 +1774,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text.primary,
   },
+  addPartBtnSmall: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.primary + '10',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   addPartButton: {
     borderColor: COLORS.accent,
     borderWidth: 1.5,
@@ -1663,6 +1795,72 @@ const styles = StyleSheet.create({
   },
   partActions: {
     flexDirection: 'row',
+  },
+  // ── Action Buttons ──
+  actionButtons: {
+    padding: 16,
+    gap: 10,
+    backgroundColor: COLORS.surface,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline,
+  },
+  saveBtn: {
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+  },
+  saveBtnDone: {},
+  saveBtnGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 15,
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  saveBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  whatsappBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#25D366',
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: 14,
+  },
+  startBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.secondary,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: 14,
+  },
+  actionBtnDisabled: {
+    opacity: 0.45,
+  },
+  actionBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  // ── Modals ──
+  addCustomerButtonContent: {
+    height: 56,
+  },
+  addCustomerButtonLabel: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   partFormScroll: {
     maxHeight: 300,
@@ -1692,50 +1890,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.accent,
-  },
-  actionButtons: {
-    padding: SPACING.lg,
-    gap: SPACING.md,
-    backgroundColor: COLORS.surface,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.outline,
-  },
-  actionButton: {
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  actionButtonContent: {
-    height: 50,
-  },
-  actionButtonLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text.onPrimary,
-  },
-  actionButtonsRow: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-  },
-  actionButtonHalf: {
-    flex: 1,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  saveInvoiceButton: {
-    backgroundColor: COLORS.primary,
-  },
-  whatsappButton: {
-    backgroundColor: '#25D366',
-  },
-  whatsappButtonText: {
-    color: COLORS.text.onPrimary,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  startButton: {
-    backgroundColor: COLORS.secondary,
-  },
-  completedButton: {
-    backgroundColor: COLORS.success,
   },
   customerModal: {
     backgroundColor: COLORS.surface,

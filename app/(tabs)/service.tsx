@@ -7,6 +7,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import {
     Alert,
     Dimensions,
+    DimensionValue,
     FlatList,
     Linking,
     Modal,
@@ -36,6 +37,10 @@ import { getAllInspections } from '../../src/services/firebase';
 import { formatCurrencyGEL } from '../../src/utils/helpers';
 
 const { width } = Dimensions.get('window');
+const GRID_CARD_WIDTH = (width - 48) / 2; // 2 columns with spacing
+
+type ViewMode = 'list' | 'grid';
+type RepairFilterValue = 'all' | string;
 
 interface InspectionCase {
   id: string;
@@ -102,7 +107,12 @@ export default function ServiceCasesScreen() {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'days_high' | 'days_low' | 'cost_high' | 'cost_low'>('days_high');
   const [statusFilter, setStatusFilter] = useState<'all' | 'In Service' | 'Already in service'>('all');
   const [sortMenuVisible, setSortMenuVisible] = useState(false);
-  const [filterMenuVisible, setFilterMenuVisible] = useState(false);
+  
+  // View mode & advanced filters
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [repairStatusFilter, setRepairStatusFilter] = useState<RepairFilterValue>('all');
+  const [mechanicFilter, setMechanicFilter] = useState<string>('all');
+  const [showFilterBar, setShowFilterBar] = useState(true);
   
   // Repair status modal states
   const [showRepairStatusModal, setShowRepairStatusModal] = useState(false);
@@ -113,18 +123,20 @@ export default function ServiceCasesScreen() {
   const [showWorksheetModal, setShowWorksheetModal] = useState(false);
   const [worksheetCase, setWorksheetCase] = useState<CaseWithDetails | null>(null);
 
-  // Repair status options
+  // Repair status options - each stage has a unique color and step index for progress tracking
   const repairStatusOptions = [
-    { value: null, label: 'არ არის', icon: 'minus-circle-outline', color: '#94A3B8' },
-    { value: 'წინასწარი შეფასება', label: 'წინასწარი შეფასება', icon: 'clipboard-text-outline', color: '#6366F1' },
-    { value: 'მუშავდება', label: 'მუშავდება', icon: 'progress-wrench', color: '#8B5CF6' },
-    { value: 'იღებება', label: 'იღებება', icon: 'package-down', color: '#F59E0B' },
-    { value: 'იშლება', label: 'იშლება', icon: 'car-off', color: '#F59E0B' },
-    { value: 'აწყობა', label: 'აწყობა', icon: 'car-cog', color: '#F59E0B' },
-    { value: 'თუნუქი', label: 'თუნუქი', icon: 'spray', color: '#10B981' },
-    { value: 'პლასტმასის აღდგენა', label: 'პლასტმასის აღდგენა', icon: 'hammer-wrench', color: '#10B981' },
-    { value: 'პოლირება', label: 'პოლირება', icon: 'shimmer', color: '#10B981' },
-    { value: 'დაშლილი და გასული', label: 'დაშლილი და გასული', icon: 'check-circle', color: '#059669' },
+    { value: null, label: 'არ არის', icon: 'minus-circle-outline', color: '#94A3B8', step: 0 },
+    { value: 'მზადაა დასაწყებად', label: 'მზადაა დასაწყებად', icon: 'clipboard-check-outline', color: '#6366F1', step: 1 },
+    { value: 'იშლება', label: 'იშლება', icon: 'car-off', color: '#EF4444', step: 2 },
+    { value: 'თუნუქი', label: 'თუნუქი', icon: 'spray', color: '#F97316', step: 3 },
+    { value: 'პლასტმასის აღდგენა', label: 'პლასტმასის აღდგენა', icon: 'hammer-wrench', color: '#EC4899', step: 4 },
+    { value: 'იღებება', label: 'იღებება', icon: 'format-paint', color: '#3B82F6', step: 5 },
+    { value: 'მუშავდება', label: 'მუშავდება', icon: 'progress-wrench', color: '#7C3AED', step: 6 },
+    { value: 'იღებება (საბოლოო)', label: 'იღებება (საბოლოო)', icon: 'format-paint', color: '#0891B2', step: 7 },
+    { value: 'აწყობა', label: 'აწყობა', icon: 'car-cog', color: '#0EA5E9', step: 8 },
+    { value: 'პოლირება', label: 'პოლირება', icon: 'shimmer', color: '#F59E0B', step: 9 },
+    { value: 'დაშლილი და გასული', label: 'დაშლილი და გასული', icon: 'check-circle', color: '#059669', step: 10 },
+    { value: 'ნაწილს ელოდება', label: 'ნაწილს ელოდება', icon: 'clock-alert-outline', color: '#64748B', step: 11 },
   ];
 
   const getRepairStatusColor = (status: string | null | undefined): string => {
@@ -141,6 +153,22 @@ export default function ServiceCasesScreen() {
   const getRepairStatusIcon = (status: string | null | undefined): string => {
     const option = repairStatusOptions.find(opt => opt.value === status);
     return option?.icon || 'minus-circle-outline';
+  };
+
+  const getCurrentStep = (status: string | null | undefined): number => {
+    const option = repairStatusOptions.find(opt => opt.value === status);
+    return option?.step ?? 0;
+  };
+
+  const getRepairProgress = (status: string | null | undefined): number => {
+    const step = getCurrentStep(status);
+    const maxStep = repairStatusOptions.length - 1;
+    return maxStep > 0 ? Math.round((step / maxStep) * 100) : 0;
+  };
+
+  const getNextRepairStatus = (status: string | null | undefined) => {
+    const currentStep = getCurrentStep(status);
+    return repairStatusOptions.find(opt => opt.step === currentStep + 1) || null;
   };
 
   const loadServiceCases = async () => {
@@ -324,6 +352,17 @@ export default function ServiceCasesScreen() {
   const scrollOffsetRef = useRef<number>(0);
   const shouldRestoreScrollRef = useRef<boolean>(false);
 
+  // Helper: reload data then restore scroll to where user was
+  const reloadAndKeepScroll = async () => {
+    const savedOffset = scrollOffsetRef.current;
+    await loadServiceCases();
+    if (savedOffset > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToOffset({ offset: savedOffset, animated: false });
+      }, 80);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       // Only reload data if not restoring scroll position
@@ -374,6 +413,46 @@ export default function ServiceCasesScreen() {
     return `${days} დღე`;
   };
 
+  // Extract unique mechanic names for filter
+  const getUniqueMechanics = (): string[] => {
+    const mechanics = new Set<string>();
+    cases.forEach(c => {
+      if (c.assignedMechanic) mechanics.add(c.assignedMechanic);
+    });
+    return Array.from(mechanics).sort();
+  };
+
+  // Count cases per repair status for filter badges
+  const getRepairStatusCounts = (): Record<string, number> => {
+    const counts: Record<string, number> = { all: cases.length };
+    repairStatusOptions.forEach(opt => {
+      const key = opt.value || '__none__';
+      counts[key] = cases.filter(c => {
+        if (opt.value === null) return !c.repair_status;
+        return c.repair_status === opt.value;
+      }).length;
+    });
+    return counts;
+  };
+
+  // Count active filters
+  const getActiveFilterCount = (): number => {
+    let count = 0;
+    if (statusFilter !== 'all') count++;
+    if (repairStatusFilter !== 'all') count++;
+    if (mechanicFilter !== 'all') count++;
+    if (searchQuery) count++;
+    return count;
+  };
+
+  // Clear all filters
+  const clearAllFilters = () => {
+    setStatusFilter('all');
+    setRepairStatusFilter('all');
+    setMechanicFilter('all');
+    setSearchQuery('');
+  };
+
   const filterAndSortCases = () => {
     let filteredCases = cases;
 
@@ -386,6 +465,7 @@ export default function ServiceCasesScreen() {
           (caseItem.carModel?.toLowerCase() || '').includes(searchLower) ||
           (caseItem.customerName?.toLowerCase() || '').includes(searchLower) ||
           (caseItem.customerPhone?.toLowerCase() || '').includes(searchLower) ||
+          (caseItem.assignedMechanic?.toLowerCase() || '').includes(searchLower) ||
           (caseItem.services?.some(s => s.serviceName.toLowerCase().includes(searchLower)) || false)
         );
       });
@@ -394,6 +474,24 @@ export default function ServiceCasesScreen() {
     // Filter by status
     if (statusFilter !== 'all') {
       filteredCases = filteredCases.filter(c => c.status === statusFilter);
+    }
+
+    // Filter by repair status
+    if (repairStatusFilter !== 'all') {
+      if (repairStatusFilter === '__none__') {
+        filteredCases = filteredCases.filter(c => !c.repair_status);
+      } else {
+        filteredCases = filteredCases.filter(c => c.repair_status === repairStatusFilter);
+      }
+    }
+
+    // Filter by mechanic
+    if (mechanicFilter !== 'all') {
+      if (mechanicFilter === '__unassigned__') {
+        filteredCases = filteredCases.filter(c => !c.assignedMechanic);
+      } else {
+        filteredCases = filteredCases.filter(c => c.assignedMechanic === mechanicFilter);
+      }
     }
 
     // Sort cases
@@ -454,7 +552,7 @@ export default function ServiceCasesScreen() {
               }
               
               Alert.alert('✅ წარმატებული', 'სერვისი დასრულებულად მონიშნულია');
-              loadServiceCases();
+              reloadAndKeepScroll();
             } catch (error) {
               console.error('Error marking complete:', error);
               Alert.alert('❌ შეცდომა', 'სტატუსის შეცვლა ვერ მოხერხდა');
@@ -801,8 +899,9 @@ export default function ServiceCasesScreen() {
     setShowRepairStatusModal(true);
   };
 
-  const handleSaveRepairStatus = async (newStatus: string | null) => {
-    if (!selectedCase) return;
+  const handleSaveRepairStatus = async (newStatus: string | null, targetCase?: CaseWithDetails) => {
+    const caseToUpdate = targetCase || selectedCase;
+    if (!caseToUpdate) return;
     
     try {
       setSavingRepairStatus(true);
@@ -813,22 +912,28 @@ export default function ServiceCasesScreen() {
       };
 
       // Update CPanel if we have ID
-      if (selectedCase.cpanelInvoiceId) {
+      if (caseToUpdate.cpanelInvoiceId) {
         const { updateInvoiceToCPanel } = require('../../src/services/cpanelService');
-        await updateInvoiceToCPanel(selectedCase.cpanelInvoiceId, updateData);
+        await updateInvoiceToCPanel(caseToUpdate.cpanelInvoiceId, updateData);
       }
 
       // Update Firebase if not CPanel-only
-      if (selectedCase.source !== 'cpanel') {
+      if (caseToUpdate.source !== 'cpanel') {
         const { updateInspection } = require('../../src/services/firebase');
-        await updateInspection(selectedCase.id, updateData, selectedCase.cpanelInvoiceId || undefined);
+        await updateInspection(caseToUpdate.id, updateData, caseToUpdate.cpanelInvoiceId || undefined);
       }
 
       setShowRepairStatusModal(false);
       setSelectedCase(null);
-      Alert.alert('✅ წარმატება', 'რემონტის სტატუსი განახლდა');
-      // Auto-refresh the list to reflect the update
-      loadServiceCases();
+
+      // Update local state in-place so FlatList doesn't re-mount (preserves scroll)
+      setCases(prev =>
+        prev.map(c =>
+          (c.id === caseToUpdate.id && c.source === caseToUpdate.source)
+            ? { ...c, repair_status: newStatus }
+            : c
+        )
+      );
     } catch (error) {
       console.error('Error saving repair status:', error);
       Alert.alert('❌ შეცდომა', 'სტატუსის განახლება ვერ მოხერხდა');
@@ -934,23 +1039,71 @@ export default function ServiceCasesScreen() {
             </View>
           </View>
 
-          {/* Repair Status - Clickable */}
-          <TouchableOpacity 
-            style={styles.repairStatusRow}
-            onPress={() => handleOpenRepairStatusModal(item)}
-          >
-            <View style={[styles.repairStatusBadge, { backgroundColor: getRepairStatusColor(item.repair_status) + '20' }]}>
-              <MaterialCommunityIcons 
-                name={getRepairStatusIcon(item.repair_status) as any}
-                size={16} 
-                color={getRepairStatusColor(item.repair_status)} 
-              />
-              <Text style={[styles.repairStatusText, { color: getRepairStatusColor(item.repair_status) }]}>
-                {getRepairStatusLabel(item.repair_status)}
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={20} color={COLORS.text.secondary} />
-          </TouchableOpacity>
+          {/* Repair Progress Section - Redesigned */}
+          <View style={styles.repairProgressSection}>
+            {/* Progress Bar + Current Stage */}
+            <TouchableOpacity
+              style={styles.repairProgressTouchable}
+              onPress={() => handleOpenRepairStatusModal(item)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.repairProgressHeader}>
+                <View style={styles.repairProgressLabelRow}>
+                  <MaterialCommunityIcons
+                    name={getRepairStatusIcon(item.repair_status) as any}
+                    size={18}
+                    color={getRepairStatusColor(item.repair_status)}
+                  />
+                  <Text style={[styles.repairProgressLabel, { color: getRepairStatusColor(item.repair_status) }]}>
+                    {getRepairStatusLabel(item.repair_status)}
+                  </Text>
+                </View>
+                <View style={styles.repairProgressRight}>
+                  <Text style={[styles.repairProgressPercent, { color: getRepairStatusColor(item.repair_status) }]}>
+                    {getRepairProgress(item.repair_status)}%
+                  </Text>
+                  <MaterialCommunityIcons name="chevron-right" size={18} color={COLORS.text.tertiary} />
+                </View>
+              </View>
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${getRepairProgress(item.repair_status)}%`,
+                      backgroundColor: getRepairStatusColor(item.repair_status),
+                    },
+                  ]}
+                />
+              </View>
+            </TouchableOpacity>
+
+            {/* Quick Next Stage Button */}
+            {getNextRepairStatus(item.repair_status) && (
+              <TouchableOpacity
+                style={[
+                  styles.quickNextBtn,
+                  {
+                    backgroundColor: getNextRepairStatus(item.repair_status)!.color + '12',
+                    borderColor: getNextRepairStatus(item.repair_status)!.color + '30',
+                  },
+                ]}
+                onPress={() => handleSaveRepairStatus(getNextRepairStatus(item.repair_status)!.value, item)}
+                disabled={savingRepairStatus}
+                activeOpacity={0.7}
+              >
+                <MaterialCommunityIcons
+                  name={getNextRepairStatus(item.repair_status)!.icon as any}
+                  size={14}
+                  color={getNextRepairStatus(item.repair_status)!.color}
+                />
+                <Text style={[styles.quickNextLabel, { color: getNextRepairStatus(item.repair_status)!.color }]}>
+                  შემდეგი: {getNextRepairStatus(item.repair_status)!.label}
+                </Text>
+                <MaterialCommunityIcons name="arrow-right" size={14} color={getNextRepairStatus(item.repair_status)!.color} />
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Assigned Mechanic */}
           {item.assignedMechanic && (
@@ -1042,6 +1195,321 @@ export default function ServiceCasesScreen() {
     );
   };
 
+  // ────────────────────────────────────────────────────────────────
+  // GRID CARD — Compact 2-column card for grid view
+  // ────────────────────────────────────────────────────────────────
+  const renderGridCard = ({ item, index }: { item: CaseWithDetails; index: number }) => {
+    const caseTotal = calculateCaseTotal(item);
+    const isUrgent = item.daysInService > 5;
+    const repairProgress = getRepairProgress(item.repair_status);
+    const repairColor = getRepairStatusColor(item.repair_status);
+
+    const handleCardPress = () => {
+      shouldRestoreScrollRef.current = true;
+      if (item.source === 'cpanel') {
+        router.push(`/cases/${item.cpanelInvoiceId}?source=cpanel`);
+      } else {
+        router.push(`/cases/${item.id}`);
+      }
+    };
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.gridCard,
+          isUrgent && styles.gridCardUrgent,
+          { marginLeft: index % 2 === 0 ? 0 : 8 },
+        ]}
+        onPress={handleCardPress}
+        activeOpacity={0.7}
+      >
+        {/* Urgent indicator strip */}
+        {isUrgent && <View style={styles.gridUrgentStrip} />}
+
+        {/* Plate & Days */}
+        <View style={styles.gridCardHeader}>
+          <Text style={styles.gridPlateText} numberOfLines={1}>
+            {item.plate || item.carModel}
+          </Text>
+          <View style={[styles.gridDaysBadge, { backgroundColor: getDaysInServiceColor(item.daysInService) + '20' }]}>
+            <Text style={[styles.gridDaysText, { color: getDaysInServiceColor(item.daysInService) }]}>
+              {item.daysInService}დ
+            </Text>
+          </View>
+        </View>
+
+        {/* Vehicle */}
+        {(item.carMake || item.carModel) && (
+          <Text style={styles.gridVehicleText} numberOfLines={1}>
+            {[item.carMake, item.carModel].filter(Boolean).join(' ')}
+          </Text>
+        )}
+
+        {/* Repair Progress Mini Bar */}
+        <View style={styles.gridProgressContainer}>
+          <View style={styles.gridProgressRow}>
+            <MaterialCommunityIcons
+              name={getRepairStatusIcon(item.repair_status) as any}
+              size={12}
+              color={repairColor}
+            />
+            <Text style={[styles.gridProgressLabel, { color: repairColor }]} numberOfLines={1}>
+              {getRepairStatusLabel(item.repair_status)}
+            </Text>
+          </View>
+          <View style={styles.gridProgressTrack}>
+            <View
+              style={[
+                styles.gridProgressFill,
+                { width: `${repairProgress}%` as DimensionValue, backgroundColor: repairColor },
+              ]}
+            />
+          </View>
+        </View>
+
+        {/* Mechanic */}
+        {item.assignedMechanic && (
+          <View style={styles.gridMechanicRow}>
+            <MaterialCommunityIcons name="account-wrench" size={12} color="#6366F1" />
+            <Text style={styles.gridMechanicText} numberOfLines={1}>
+              {item.assignedMechanic}
+            </Text>
+          </View>
+        )}
+
+        {/* Customer */}
+        <View style={styles.gridCustomerRow}>
+          <MaterialCommunityIcons name="account" size={12} color={COLORS.text.tertiary} />
+          <Text style={styles.gridCustomerText} numberOfLines={1}>
+            {item.customerName || 'N/A'}
+          </Text>
+        </View>
+
+        {/* Footer: Total + Status Chip */}
+        <View style={styles.gridCardFooter}>
+          <Text style={styles.gridTotalText}>
+            {formatCurrencyGEL(caseTotal)}
+          </Text>
+          <View style={[
+            styles.gridStatusDot,
+            { backgroundColor: item.status === 'In Service' ? '#2196F3' : '#9C27B0' },
+          ]} />
+        </View>
+
+        {/* Quick action buttons */}
+        <View style={styles.gridActions}>
+          <TouchableOpacity
+            style={styles.gridActionBtn}
+            onPress={() => handleOpenRepairStatusModal(item)}
+          >
+            <MaterialCommunityIcons name="progress-wrench" size={16} color={COLORS.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.gridActionBtn}
+            onPress={() => handleCallCustomer(item.customerPhone)}
+          >
+            <MaterialCommunityIcons name="phone" size={16} color={COLORS.success} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.gridActionBtn, { backgroundColor: COLORS.success + '15' }]}
+            onPress={() => handleMarkComplete(item)}
+          >
+            <MaterialCommunityIcons name="check" size={16} color={COLORS.success} />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // ────────────────────────────────────────────────────────────────
+  // FILTER BAR — Horizontal scrollable filter chips
+  // ────────────────────────────────────────────────────────────────
+  const renderFilterBar = () => {
+    const repairCounts = getRepairStatusCounts();
+    const mechanics = getUniqueMechanics();
+    const activeCount = getActiveFilterCount();
+
+    return (
+      <View style={styles.filterBarContainer}>
+        {/* Active filters indicator + Clear */}
+        {activeCount > 0 && (
+          <View style={styles.activeFiltersRow}>
+            <View style={styles.activeFiltersBadge}>
+              <MaterialCommunityIcons name="filter-check" size={14} color="#FFF" />
+              <Text style={styles.activeFiltersText}>{activeCount} ფილტრი</Text>
+            </View>
+            <TouchableOpacity onPress={clearAllFilters} style={styles.clearFiltersBtn}>
+              <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.error} />
+              <Text style={styles.clearFiltersText}>გასუფთავება</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Status Filter Row */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScrollRow}
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          <View style={styles.filterGroupLabel}>
+            <MaterialCommunityIcons name="car-wrench" size={14} color={COLORS.text.tertiary} />
+          </View>
+          {[
+            { key: 'all', label: 'ყველა', color: COLORS.primary },
+            { key: 'In Service', label: 'სერვისშია', color: '#2196F3' },
+            { key: 'Already in service', label: 'უკვე სერვისში', color: '#9C27B0' },
+          ].map(f => (
+            <TouchableOpacity
+              key={f.key}
+              style={[
+                styles.filterChip,
+                statusFilter === f.key && { backgroundColor: f.color, borderColor: f.color },
+              ]}
+              onPress={() => setStatusFilter(f.key as typeof statusFilter)}
+            >
+              <Text style={[
+                styles.filterChipText,
+                statusFilter === f.key && styles.filterChipTextActive,
+              ]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Repair Status Filter Row */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScrollRow}
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          <View style={styles.filterGroupLabel}>
+            <MaterialCommunityIcons name="progress-wrench" size={14} color={COLORS.text.tertiary} />
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              repairStatusFilter === 'all' && { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+            ]}
+            onPress={() => setRepairStatusFilter('all')}
+          >
+            <Text style={[
+              styles.filterChipText,
+              repairStatusFilter === 'all' && styles.filterChipTextActive,
+            ]}>
+              ყველა
+            </Text>
+            <View style={styles.filterChipBadge}>
+              <Text style={styles.filterChipBadgeText}>{repairCounts['all']}</Text>
+            </View>
+          </TouchableOpacity>
+          {repairStatusOptions.map(opt => {
+            const filterKey = opt.value || '__none__';
+            const count = repairCounts[filterKey] || 0;
+            if (count === 0) return null;
+            return (
+              <TouchableOpacity
+                key={filterKey}
+                style={[
+                  styles.filterChip,
+                  repairStatusFilter === filterKey && { backgroundColor: opt.color, borderColor: opt.color },
+                ]}
+                onPress={() => setRepairStatusFilter(filterKey)}
+              >
+                <MaterialCommunityIcons
+                  name={opt.icon as any}
+                  size={13}
+                  color={repairStatusFilter === filterKey ? '#FFF' : opt.color}
+                />
+                <Text style={[
+                  styles.filterChipText,
+                  repairStatusFilter === filterKey && styles.filterChipTextActive,
+                ]} numberOfLines={1}>
+                  {opt.label}
+                </Text>
+                <View style={[
+                  styles.filterChipBadge,
+                  repairStatusFilter === filterKey && { backgroundColor: 'rgba(255,255,255,0.3)' },
+                ]}>
+                  <Text style={[
+                    styles.filterChipBadgeText,
+                    repairStatusFilter === filterKey && { color: '#FFF' },
+                  ]}>{count}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* Mechanic Filter Row (only show if mechanics exist) */}
+        {mechanics.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterScrollRow}
+            contentContainerStyle={styles.filterScrollContent}
+          >
+            <View style={styles.filterGroupLabel}>
+              <MaterialCommunityIcons name="account-wrench" size={14} color={COLORS.text.tertiary} />
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                mechanicFilter === 'all' && { backgroundColor: '#6366F1', borderColor: '#6366F1' },
+              ]}
+              onPress={() => setMechanicFilter('all')}
+            >
+              <Text style={[
+                styles.filterChipText,
+                mechanicFilter === 'all' && styles.filterChipTextActive,
+              ]}>
+                ყველა
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                mechanicFilter === '__unassigned__' && { backgroundColor: '#94A3B8', borderColor: '#94A3B8' },
+              ]}
+              onPress={() => setMechanicFilter('__unassigned__')}
+            >
+              <Text style={[
+                styles.filterChipText,
+                mechanicFilter === '__unassigned__' && styles.filterChipTextActive,
+              ]}>
+                არ არის მინიჭებული
+              </Text>
+            </TouchableOpacity>
+            {mechanics.map(m => (
+              <TouchableOpacity
+                key={m}
+                style={[
+                  styles.filterChip,
+                  mechanicFilter === m && { backgroundColor: '#6366F1', borderColor: '#6366F1' },
+                ]}
+                onPress={() => setMechanicFilter(m)}
+              >
+                <MaterialCommunityIcons
+                  name="account"
+                  size={13}
+                  color={mechanicFilter === m ? '#FFF' : '#6366F1'}
+                />
+                <Text style={[
+                  styles.filterChipText,
+                  mechanicFilter === m && styles.filterChipTextActive,
+                ]} numberOfLines={1}>
+                  {m}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    );
+  };
+
   const filteredCases = filterAndSortCases();
   const stats = getStatistics();
 
@@ -1063,13 +1531,13 @@ export default function ServiceCasesScreen() {
             <MaterialCommunityIcons name="car-wrench" size={28} color={COLORS.primary} />
             <Text style={styles.headerTitle}>სერვისში</Text>
             <Chip mode="flat" style={styles.countChip}>
-              {stats.total}
+              {filteredCases.length}{stats.total !== filteredCases.length ? `/${stats.total}` : ''}
             </Chip>
           </View>
           <View style={styles.headerActions}>
             <IconButton
               icon={showSearch ? 'close' : 'magnify'}
-              size={24}
+              size={22}
               onPress={() => setShowSearch(!showSearch)}
             />
             <Menu
@@ -1078,7 +1546,7 @@ export default function ServiceCasesScreen() {
               anchor={
                 <IconButton
                   icon="sort"
-                  size={24}
+                  size={22}
                   onPress={() => setSortMenuVisible(true)}
                 />
               }
@@ -1090,24 +1558,48 @@ export default function ServiceCasesScreen() {
               <Menu.Item onPress={() => { setSortBy('newest'); setSortMenuVisible(false); }} title="📅 ახალი → ძველი" />
               <Menu.Item onPress={() => { setSortBy('oldest'); setSortMenuVisible(false); }} title="📆 ძველი → ახალი" />
             </Menu>
-            <Menu
-              visible={filterMenuVisible}
-              onDismiss={() => setFilterMenuVisible(false)}
-              anchor={
-                <IconButton
-                  icon="filter"
-                  size={24}
-                  onPress={() => setFilterMenuVisible(true)}
+            {/* View Mode Toggle */}
+            <View style={styles.viewToggleContainer}>
+              <TouchableOpacity
+                style={[styles.viewToggleBtn, viewMode === 'list' && styles.viewToggleBtnActive]}
+                onPress={() => setViewMode('list')}
+              >
+                <MaterialCommunityIcons
+                  name="view-list"
+                  size={18}
+                  color={viewMode === 'list' ? '#FFF' : COLORS.text.secondary}
                 />
-              }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.viewToggleBtn, viewMode === 'grid' && styles.viewToggleBtnActive]}
+                onPress={() => setViewMode('grid')}
+              >
+                <MaterialCommunityIcons
+                  name="view-grid"
+                  size={18}
+                  color={viewMode === 'grid' ? '#FFF' : COLORS.text.secondary}
+                />
+              </TouchableOpacity>
+            </View>
+            {/* Filter bar toggle */}
+            <TouchableOpacity
+              style={[styles.filterToggleBtn, showFilterBar && styles.filterToggleBtnActive]}
+              onPress={() => setShowFilterBar(!showFilterBar)}
             >
-              <Menu.Item onPress={() => { setStatusFilter('all'); setFilterMenuVisible(false); }} title="ყველა" />
-              <Menu.Item onPress={() => { setStatusFilter('In Service'); setFilterMenuVisible(false); }} title="სერვისშია" />
-              <Menu.Item onPress={() => { setStatusFilter('Already in service'); setFilterMenuVisible(false); }} title="უკვე სერვისში" />
-            </Menu>
+              <MaterialCommunityIcons
+                name="filter-variant"
+                size={20}
+                color={showFilterBar ? '#FFF' : COLORS.text.secondary}
+              />
+              {getActiveFilterCount() > 0 && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{getActiveFilterCount()}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
             <IconButton
               icon="refresh"
-              size={24}
+              size={22}
               onPress={onRefresh}
               loading={refreshing}
             />
@@ -1116,7 +1608,7 @@ export default function ServiceCasesScreen() {
         
         {showSearch && (
           <Searchbar
-            placeholder="ძებნა..."
+            placeholder="ძებნა: ნომერი, მარკა, კლიენტი, მექანიკოსი..."
             value={searchQuery}
             onChangeText={setSearchQuery}
             style={styles.searchBar}
@@ -1145,27 +1637,59 @@ export default function ServiceCasesScreen() {
         </View>
       </Surface>
 
-      {/* Cases List */}
+      {/* Filter Bar */}
+      {showFilterBar && renderFilterBar()}
+
+      {/* Cases List / Grid */}
       {filteredCases.length === 0 ? (
         <View style={styles.emptyContainer}>
           <MaterialCommunityIcons name="car-off" size={64} color={COLORS.text.disabled} />
           <Text style={styles.emptyTitle}>
-            {searchQuery || statusFilter !== 'all' 
+            {getActiveFilterCount() > 0 
               ? 'შედეგები არ მოიძებნა' 
               : 'სერვისში მყოფი შემთხვევები არ არის'}
           </Text>
           <Text style={styles.emptySubtitle}>
-            {searchQuery || statusFilter !== 'all'
-              ? 'სცადეთ სხვა ძებნის პარამეტრები'
+            {getActiveFilterCount() > 0
+              ? 'სცადეთ სხვა ფილტრების პარამეტრები ან გაასუფთავეთ ფილტრები'
               : 'როდესაც შემთხვევას მიანიჭებთ "სერვისშია" სტატუსს, ის აქ გამოჩნდება'}
           </Text>
+          {getActiveFilterCount() > 0 && (
+            <TouchableOpacity style={styles.emptyResetBtn} onPress={clearAllFilters}>
+              <MaterialCommunityIcons name="filter-remove" size={18} color={COLORS.primary} />
+              <Text style={styles.emptyResetText}>ფილტრების გასუფთავება</Text>
+            </TouchableOpacity>
+          )}
         </View>
+      ) : viewMode === 'grid' ? (
+        <FlatList
+          key="grid"
+          data={filteredCases}
+          renderItem={renderGridCard}
+          keyExtractor={(item) => `grid-${item.source}-${item.id}`}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
+          contentContainerStyle={styles.gridListContent}
+          onScroll={(event) => {
+            scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[COLORS.primary]}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        />
       ) : (
         <FlatList
+          key="list"
           ref={flatListRef}
           data={filteredCases}
           renderItem={renderCaseCard}
-          keyExtractor={(item) => `${item.source}-${item.id}`}
+          keyExtractor={(item) => `list-${item.source}-${item.id}`}
           contentContainerStyle={styles.listContent}
           onScroll={(event) => {
             scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
@@ -1182,7 +1706,7 @@ export default function ServiceCasesScreen() {
         />
       )}
 
-      {/* Repair Status Modal */}
+      {/* Repair Status Bottom Sheet */}
       <Modal
         visible={showRepairStatusModal}
         transparent={true}
@@ -1192,71 +1716,139 @@ export default function ServiceCasesScreen() {
           setSelectedCase(null);
         }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.repairStatusModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>რემონტის სტატუსი</Text>
+        <TouchableOpacity
+          style={styles.bottomSheetOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            setShowRepairStatusModal(false);
+            setSelectedCase(null);
+          }}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.bottomSheetContainer}>
+            {/* Drag Handle */}
+            <View style={styles.bottomSheetHandle}>
+              <View style={styles.bottomSheetHandleBar} />
+            </View>
+
+            {/* Header */}
+            <View style={styles.bottomSheetHeader}>
+              <Text style={styles.bottomSheetTitle}>რემონტის ეტაპი</Text>
               {selectedCase && (
-                <Text style={styles.modalSubtitle}>{selectedCase.plate || selectedCase.carModel}</Text>
-              )}
-              <TouchableOpacity 
-                style={styles.modalCloseButton}
-                onPress={() => {
-                  setShowRepairStatusModal(false);
-                  setSelectedCase(null);
-                }}
-              >
-                <MaterialCommunityIcons name="close" size={24} color={COLORS.text.secondary} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-            {repairStatusOptions.map((option) => (
-              <TouchableOpacity
-                key={option.value || 'none'}
-                style={[
-                  styles.repairStatusOption,
-                  selectedCase?.repair_status === option.value && styles.repairStatusOptionActive,
-                  { borderLeftColor: option.color }
-                ]}
-                onPress={() => handleSaveRepairStatus(option.value)}
-                disabled={savingRepairStatus}
-              >
-                <MaterialCommunityIcons 
-                  name={option.icon as any} 
-                  size={24} 
-                  color={option.color} 
-                />
-                <Text style={[
-                  styles.repairStatusOptionText,
-                  selectedCase?.repair_status === option.value && { color: option.color, fontWeight: '700' }
-                ]}>
-                  {option.label}
+                <Text style={styles.bottomSheetSubtitle}>
+                  🚗 {selectedCase.plate || selectedCase.carModel}
+                  {selectedCase.customerName ? `  •  ${selectedCase.customerName}` : ''}
                 </Text>
-                {selectedCase?.repair_status === option.value && (
-                  <MaterialCommunityIcons name="check" size={20} color={option.color} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <View style={styles.modalFooter}>
-            <Button 
-              mode="outlined" 
-              onPress={() => {
-                setShowRepairStatusModal(false);
-                setSelectedCase(null);
-              }}
-              style={styles.modalCancelButton}
-            >
-              დახურვა
-            </Button>
-          </View>
-          {savingRepairStatus && (
-            <View style={styles.modalLoading}>
-              <ActivityIndicator size="large" color={COLORS.primary} />
+              )}
             </View>
-          )}
-          </View>
-        </View>
+
+            {/* Visual Timeline */}
+            <ScrollView
+              style={styles.bottomSheetContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              {repairStatusOptions.map((option, index) => {
+                const currentStep = getCurrentStep(selectedCase?.repair_status);
+                const isCompleted = option.step > 0 && option.step < currentStep;
+                const isCurrent = option.step === currentStep;
+                const isFuture = option.step > currentStep;
+                const isLast = index === repairStatusOptions.length - 1;
+
+                return (
+                  <TouchableOpacity
+                    key={option.value || 'none'}
+                    style={styles.timelineOption}
+                    onPress={() => handleSaveRepairStatus(option.value)}
+                    disabled={savingRepairStatus}
+                    activeOpacity={0.6}
+                  >
+                    {/* Timeline Connector */}
+                    <View style={styles.timelineConnector}>
+                      {index > 0 && (
+                        <View
+                          style={[
+                            styles.timelineLineTop,
+                            (isCompleted || isCurrent) ? { backgroundColor: option.color } : { backgroundColor: '#E2E8F0' },
+                          ]}
+                        />
+                      )}
+                      <View
+                        style={[
+                          styles.timelineDot,
+                          isCurrent && [
+                            styles.timelineDotActive,
+                            { backgroundColor: option.color, borderColor: option.color + '40' },
+                          ],
+                          isCompleted && { backgroundColor: option.color },
+                          isFuture && styles.timelineDotFuture,
+                          option.step === 0 && !isCurrent && { backgroundColor: '#CBD5E1' },
+                        ]}
+                      >
+                        {isCompleted && (
+                          <MaterialCommunityIcons name="check" size={10} color="#FFF" />
+                        )}
+                        {isCurrent && (
+                          <MaterialCommunityIcons name={option.icon as any} size={12} color="#FFF" />
+                        )}
+                      </View>
+                      {!isLast && (
+                        <View
+                          style={[
+                            styles.timelineLineBottom,
+                            isCompleted
+                              ? { backgroundColor: repairStatusOptions[index + 1]?.color || '#E2E8F0' }
+                              : { backgroundColor: '#E2E8F0' },
+                          ]}
+                        />
+                      )}
+                    </View>
+
+                    {/* Option Content */}
+                    <View
+                      style={[
+                        styles.timelineContent,
+                        isCurrent && {
+                          backgroundColor: option.color + '10',
+                          borderColor: option.color + '30',
+                        },
+                      ]}
+                    >
+                      <View style={styles.timelineContentRow}>
+                        <MaterialCommunityIcons
+                          name={option.icon as any}
+                          size={20}
+                          color={isFuture ? '#94A3B8' : option.color}
+                        />
+                        <Text
+                          style={[
+                            styles.timelineLabel,
+                            isCurrent && { color: option.color, fontWeight: '700' },
+                            isCompleted && { color: option.color, fontWeight: '600' },
+                            isFuture && { color: '#94A3B8' },
+                          ]}
+                        >
+                          {option.label}
+                        </Text>
+                        {isCurrent && (
+                          <View style={[styles.currentBadge, { backgroundColor: option.color }]}>
+                            <Text style={styles.currentBadgeText}>ახლა</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {savingRepairStatus && (
+              <View style={styles.bottomSheetLoading}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={styles.bottomSheetLoadingText}>ინახება...</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       {/* Worksheet Preview Modal */}
@@ -1746,25 +2338,65 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  // Repair Status Card Styles
-  repairStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  // Repair Progress Card Styles
+  repairProgressSection: {
     marginBottom: 12,
-    paddingVertical: 6,
+    gap: 8,
   },
-  repairStatusBadge: {
+  repairProgressTouchable: {
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    padding: 12,
+  },
+  repairProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  repairProgressLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    flex: 1,
   },
-  repairStatusText: {
+  repairProgressLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  repairProgressRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  repairProgressPercent: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+    minWidth: 4,
+  },
+  quickNextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  quickNextLabel: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   // Mechanic Styles
   mechanicRow: {
@@ -1784,18 +2416,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  // Repair Status Modal Styles
+  // Shared Modal Styles (used by worksheet modal)
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     padding: 20,
-  },
-  repairStatusModal: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    maxHeight: '80%',
-    overflow: 'hidden',
   },
   modalCloseButton: {
     position: 'absolute',
@@ -1803,57 +2429,130 @@ const styles = StyleSheet.create({
     top: 16,
     zIndex: 1,
   },
-  modalHeader: {
-    padding: 20,
+  // Bottom Sheet Styles
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-end',
+  },
+  bottomSheetContainer: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '78%',
+    paddingBottom: 28,
+  },
+  bottomSheetHandle: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  bottomSheetHandleBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#CBD5E1',
+  },
+  bottomSheetHeader: {
+    paddingHorizontal: 24,
+    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.outline,
-    alignItems: 'center',
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+  bottomSheetTitle: {
+    fontSize: 22,
+    fontWeight: '800',
     color: COLORS.text.primary,
   },
-  modalSubtitle: {
+  bottomSheetSubtitle: {
     fontSize: 14,
     color: COLORS.text.secondary,
     marginTop: 4,
   },
-  modalContent: {
-    padding: 12,
-    maxHeight: 400,
+  bottomSheetContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  repairStatusOption: {
+  // Timeline Styles
+  timelineOption: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    minHeight: 54,
+  },
+  timelineConnector: {
+    width: 36,
+    alignItems: 'center',
+  },
+  timelineLineTop: {
+    width: 2,
+    flex: 1,
+  },
+  timelineLineBottom: {
+    width: 2,
+    flex: 1,
+  },
+  timelineDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E2E8F0',
+  },
+  timelineDotActive: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 3,
+  },
+  timelineDotFuture: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+  },
+  timelineContent: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginLeft: 8,
+    marginBottom: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  timelineContentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    marginVertical: 4,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    borderLeftWidth: 4,
+    gap: 10,
   },
-  repairStatusOptionActive: {
-    backgroundColor: COLORS.primary + '10',
-  },
-  repairStatusOptionText: {
+  timelineLabel: {
     flex: 1,
     fontSize: 15,
     color: COLORS.text.primary,
+    fontWeight: '500',
   },
-  modalFooter: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.outline,
+  currentBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
-  modalCancelButton: {
-    borderColor: COLORS.outline,
+  currentBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFF',
   },
-  modalLoading: {
+  bottomSheetLoading: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  bottomSheetLoadingText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
+    fontWeight: '500',
   },
   // Footer actions
   footerActions: {
@@ -1988,5 +2687,306 @@ const styles = StyleSheet.create({
   worksheetPrintButton: {
     flex: 1,
     backgroundColor: COLORS.primary,
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // VIEW TOGGLE STYLES
+  // ══════════════════════════════════════════════════════════════
+  viewToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    padding: 2,
+    marginHorizontal: 2,
+  },
+  viewToggleBtn: {
+    padding: 6,
+    borderRadius: 6,
+  },
+  viewToggleBtnActive: {
+    backgroundColor: COLORS.primary,
+  },
+  filterToggleBtn: {
+    padding: 6,
+    borderRadius: 8,
+    marginHorizontal: 2,
+    position: 'relative',
+  },
+  filterToggleBtnActive: {
+    backgroundColor: COLORS.primary,
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: COLORS.error,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  filterBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // FILTER BAR STYLES
+  // ══════════════════════════════════════════════════════════════
+  filterBarContainer: {
+    backgroundColor: COLORS.surface,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.outline + '40',
+  },
+  activeFiltersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  activeFiltersBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  activeFiltersText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  clearFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  clearFiltersText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.error,
+  },
+  filterScrollRow: {
+    maxHeight: 40,
+  },
+  filterScrollContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    alignItems: 'center',
+    gap: 6,
+  },
+  filterGroupLabel: {
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: COLORS.outline,
+    backgroundColor: COLORS.surface,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text.secondary,
+  },
+  filterChipTextActive: {
+    color: '#FFF',
+  },
+  filterChipBadge: {
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  filterChipBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.text.secondary,
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // GRID VIEW STYLES
+  // ══════════════════════════════════════════════════════════════
+  gridListContent: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  gridRow: {
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  gridCard: {
+    flex: 1,
+    maxWidth: GRID_CARD_WIDTH,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    padding: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    overflow: 'hidden',
+  },
+  gridCardUrgent: {
+    borderWidth: 1.5,
+    borderColor: COLORS.error + '40',
+  },
+  gridUrgentStrip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: COLORS.error,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+  },
+  gridCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  gridPlateText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.text.primary,
+    flex: 1,
+    marginRight: 4,
+  },
+  gridDaysBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  gridDaysText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  gridVehicleText: {
+    fontSize: 11,
+    color: COLORS.text.tertiary,
+    marginBottom: 8,
+  },
+  gridProgressContainer: {
+    marginBottom: 8,
+  },
+  gridProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  gridProgressLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    flex: 1,
+  },
+  gridProgressTrack: {
+    height: 4,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  gridProgressFill: {
+    height: '100%' as DimensionValue,
+    borderRadius: 2,
+    minWidth: 2,
+  },
+  gridMechanicRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  gridMechanicText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#6366F1',
+    flex: 1,
+  },
+  gridCustomerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 8,
+  },
+  gridCustomerText: {
+    fontSize: 11,
+    color: COLORS.text.tertiary,
+    flex: 1,
+  },
+  gridCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.outline + '40',
+  },
+  gridTotalText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  gridStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  gridActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  gridActionBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: COLORS.background,
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // EMPTY STATE EXTRAS
+  // ══════════════════════════════════════════════════════════════
+  emptyResetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary + '15',
+    borderWidth: 1,
+    borderColor: COLORS.primary + '30',
+  },
+  emptyResetText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
 });

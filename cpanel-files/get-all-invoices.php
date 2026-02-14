@@ -68,7 +68,7 @@ try {
         if (!empty($invoice['repair_parts'])) {
             $rawParts = json_decode($invoice['repair_parts'], true) ?? [];
             // Transform parts to app format
-            $parts = array_map(function($part) {
+            $parts = array_map(function($part, $index) {
                 $quantity = intval($part['quantity'] ?? 1);
                 $unitPrice = floatval($part['unit_price'] ?? $part['unitPrice'] ?? 0);
                 $totalPrice = floatval($part['total_price'] ?? $part['totalPrice'] ?? 0);
@@ -85,6 +85,7 @@ try {
                 }
 
                 return [
+                    'id' => $part['id'] ?? ('part-' . $index),
                     'name' => $part['name'] ?? $part['name_en'] ?? 'Unknown Part',
                     'nameKa' => $part['name'] ?? $part['name_en'] ?? 'უცნობი ნაწილი',
                     'partName' => $part['partName'] ?? $part['name'] ?? $part['name_en'] ?? 'Unknown Part',
@@ -95,12 +96,57 @@ try {
                     'notes' => $part['notes'] ?? '',
                     'damages' => $damages,
                 ];
-            }, $rawParts);
+            }, $rawParts, array_keys($rawParts));
         }
 
+        // Parse photos from case_images column (NOT 'photos' - that column doesn't exist)
         $photos = [];
-        if (!empty($invoice['photos'])) {
-            $photos = json_decode($invoice['photos'], true) ?? [];
+        if (!empty($invoice['case_images'])) {
+            $rawImages = json_decode($invoice['case_images'], true) ?? [];
+            
+            // Parse systemLogs for enriched photo metadata (tags, labels)
+            $photoMetadata = [];
+            if (!empty($invoice['systemLogs'])) {
+                $systemLogs = json_decode($invoice['systemLogs'], true);
+                if (is_array($systemLogs)) {
+                    foreach ($systemLogs as $meta) {
+                        if (isset($meta['url'])) {
+                            $photoMetadata[$meta['url']] = $meta;
+                        }
+                    }
+                }
+            }
+            
+            // Transform to app photo format: { url, label, tags, tagCount, uploadedAt }
+            foreach ($rawImages as $index => $img) {
+                $url = is_string($img) ? $img : ($img['url'] ?? $img['downloadURL'] ?? $img['uri'] ?? null);
+                if (!$url) continue;
+                
+                $label = 'Photo ' . ($index + 1);
+                $tags = [];
+                $uploadedAt = null;
+                
+                // Enrich from systemLogs metadata if available
+                if (isset($photoMetadata[$url])) {
+                    $meta = $photoMetadata[$url];
+                    $label = $meta['label'] ?? $label;
+                    $tags = $meta['tags'] ?? [];
+                    $uploadedAt = $meta['uploadedAt'] ?? null;
+                }
+                if (is_array($img)) {
+                    $label = $img['label'] ?? $label;
+                    $tags = $img['tags'] ?? $tags;
+                    $uploadedAt = $img['uploadedAt'] ?? $uploadedAt;
+                }
+                
+                $photos[] = [
+                    'url' => $url,
+                    'label' => $label,
+                    'tags' => $tags,
+                    'tagCount' => count($tags),
+                    'uploadedAt' => $uploadedAt ?? date('c'),
+                ];
+            }
         }
 
         // Transform repair_labor to app services format
